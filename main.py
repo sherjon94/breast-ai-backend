@@ -46,13 +46,26 @@ ort_session = None
 
 try:
     import onnxruntime as ort
-    MODEL_PATH = Path("breast_ai_model.onnx")
-    if MODEL_PATH.exists():
+    # Bir necha joyda qidirish
+    possible_paths = [
+        Path("breast_ai_model.onnx"),
+        Path(__file__).parent / "breast_ai_model.onnx",
+        Path("/opt/render/project/src/breast_ai_model.onnx"),
+        Path("/app/breast_ai_model.onnx"),
+    ]
+    MODEL_PATH = None
+    for p in possible_paths:
+        print(f"Qidirilmoqda: {p} — {'topildi' if p.exists() else 'yo\'q'}")
+        if p.exists():
+            MODEL_PATH = p
+            break
+    
+    if MODEL_PATH:
         ort_session = ort.InferenceSession(str(MODEL_PATH))
         AI_AVAILABLE = True
         print("✓ AI model yuklandi:", str(MODEL_PATH))
     else:
-        print("⚠ ONNX model topilmadi — mock rejim")
+        print("⚠ ONNX model hech qayerda topilmadi — mock rejim")
 except ImportError:
     print("⚠ onnxruntime o'rnatilmagan — mock rejim")
 except Exception as e:
