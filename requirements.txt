@@ -5,3 +5,4 @@ pydantic
 pillow
 numpy
 onnxruntime==1.26.0
+pydicom

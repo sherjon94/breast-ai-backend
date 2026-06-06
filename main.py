@@ -14,6 +14,9 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 import io
+import zipfile
+import tempfile
+import os
 
 app = FastAPI(
     title="Breast AI API",
@@ -54,6 +57,125 @@ except ImportError:
     print("⚠ onnxruntime o'rnatilmagan — mock rejim")
 except Exception as e:
     print(f"⚠ Model yuklashda xato: {e} — mock rejim")
+
+
+def read_dicom(dicom_bytes: bytes):
+    """DICOM faylni o'qib PIL Image ga aylantirish"""
+    try:
+        import pydicom
+        from pydicom.pixels import convert_color_space
+        
+        ds = pydicom.dcmread(io.BytesIO(dicom_bytes))
+        pixel_array = ds.pixel_array.astype(np.float32)
+        
+        # Normalize to 0-255
+        pixel_min = pixel_array.min()
+        pixel_max = pixel_array.max()
+        if pixel_max > pixel_min:
+            pixel_array = (pixel_array - pixel_min) / (pixel_max - pixel_min) * 255
+        pixel_array = pixel_array.astype(np.uint8)
+        
+        from PIL import Image
+        # DICOM grayscale -> RGB
+        if len(pixel_array.shape) == 2:
+            img = Image.fromarray(pixel_array, mode='L').convert('RGB')
+        elif len(pixel_array.shape) == 3:
+            img = Image.fromarray(pixel_array).convert('RGB')
+        else:
+            raise ValueError("Noto'g'ri DICOM pixel format")
+        
+        # PNG ga convert qilib bytes qaytarish
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        return buf.getvalue(), img
+    except Exception as e:
+        raise HTTPException(422, f"DICOM faylni o'qib bo'lmadi: {str(e)}")
+
+
+def extract_zip_dicoms(zip_bytes: bytes) -> list[bytes]:
+    """ZIP arxivdan DICOM fayllarni chiqarish"""
+    dicom_files = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            for name in zf.namelist():
+                lower = name.lower()
+                # DICOM fayllarni topish (.dcm yoki kengaytmasiz)
+                if lower.endswith('.dcm') or lower.endswith('.dicom') or                    ('/' in name and not lower.endswith(('.jpg','.png','.txt','.xml','.json'))):
+                    try:
+                        data = zf.read(name)
+                        if len(data) > 128:  # DICOM kamida 128 bayt
+                            dicom_files.append((name, data))
+                    except:
+                        pass
+                # Oddiy rasm fayllar
+                elif lower.endswith(('.jpg', '.jpeg', '.png')):
+                    try:
+                        data = zf.read(name)
+                        dicom_files.append((name, data))
+                    except:
+                        pass
+        
+        if not dicom_files:
+            raise HTTPException(422, "ZIP arxivda DICOM yoki rasm fayllari topilmadi")
+        
+        return dicom_files
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Noto'g'ri ZIP fayl")
+
+
+def is_medical_image(image_bytes: bytes) -> tuple[bool, str]:def is_medical_image(image_bytes: bytes) -> tuple[bool, str]:
+    """
+    Rasmning tibbiy ekanligini tekshirish.
+    Ultrasound va mammografiya rasmlari odatda:
+    - Ko'proq kulrang tonlarda bo'ladi
+    - Past rang to'yinganligi (saturation)
+    - Yuqori kontrast
+    - Ko'pincha qora fon
+    """
+    from PIL import Image
+    import numpy as np
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img_small = img.resize((64, 64))
+        arr = np.array(img_small, dtype=np.float32)
+
+        r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+
+        # 1. Rang tekshirish — tibbiy rasmlar kulrang bo'ladi
+        # RGB kanallari orasidagi farq kichik bo'lishi kerak
+        rg_diff = np.mean(np.abs(r - g))
+        rb_diff = np.mean(np.abs(r - b))
+        gb_diff = np.mean(np.abs(g - b))
+        avg_color_diff = (rg_diff + rb_diff + gb_diff) / 3
+
+        # Agar rang farqi katta bo'lsa — rangli rasm (tibbiy emas)
+        if avg_color_diff > 30:
+            return False, f"Rasm tibbiy emas: rang to'yinganligi yuqori ({avg_color_diff:.1f}). Ultrasound yoki mammografiya rasmi yuklang."
+
+        # 2. Qoralik tekshirish — tibbiy rasmlar ko'pincha qora fonga ega
+        brightness = np.mean(arr)
+
+        # Juda yorqin rasm (oddiy foto)
+        if brightness > 220:
+            return False, "Rasm juda yorqin. Ultrasound yoki mammografiya rasmi yuklang."
+
+        # 3. Kontrast tekshirish — tibbiy rasmlar yuqori kontrastga ega
+        gray = 0.299*r + 0.587*g + 0.114*b
+        contrast = np.std(gray)
+
+        if contrast < 15:
+            return False, "Rasm kontrastsi past. Sifatli tibbiy rasm yuklang."
+
+        # 4. O'lcham tekshirish
+        w, h = img.size
+        if w < 100 or h < 100:
+            return False, f"Rasm o'lchami juda kichik ({w}x{h}). Kamida 100x100 piksel bo'lishi kerak."
+
+        return True, "OK"
+
+    except Exception as e:
+        return False, f"Rasmni o'qib bo'lmadi: {str(e)}"
 
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
@@ -273,17 +395,77 @@ async def analyze_combined(req: CombinedRequest):
 
 @app.post("/api/analyze/image")
 async def analyze_image(file: UploadFile = File(...)):
-    """Rasm yuklash va AI tahlil (ONNX model bilan)"""
-    allowed = {"image/jpeg", "image/png", "image/jpg"}
-    if file.content_type not in allowed:
-        raise HTTPException(400, "Faqat JPG yoki PNG qabul qilinadi")
+    """Rasm yuklash: JPG, PNG, DICOM (.dcm), ZIP arxiv"""
     content = await file.read()
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(400, "Fayl hajmi 20MB dan oshmasin")
-    if AI_AVAILABLE:
-        return run_ai_inference(content)
-    else:
-        return mock_inference()
+    filename = (file.filename or "").lower()
+    content_type = file.content_type or ""
+    
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(400, "Fayl hajmi 50MB dan oshmasin")
+
+    # ── ZIP arxiv ──────────────────────────────────────────────────────────────
+    if filename.endswith('.zip') or content_type == 'application/zip':
+        dicom_list = extract_zip_dicoms(content)
+        results = []
+        
+        for name, data in dicom_list[:5]:  # Max 5 ta fayl
+            try:
+                if name.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    img_bytes = data
+                else:
+                    img_bytes, _ = read_dicom(data)
+                    img_bytes = img_bytes
+                
+                is_valid, reason = is_medical_image(img_bytes)
+                if is_valid:
+                    result = run_ai_inference(img_bytes) if AI_AVAILABLE else mock_inference()
+                    result["filename"] = name
+                    results.append(result)
+            except:
+                pass
+        
+        if not results:
+            raise HTTPException(422, "ZIP ichidagi fayllarda tibbiy rasm topilmadi")
+        
+        # Eng xavfli natijani qaytarish
+        best = max(results, key=lambda r: r.get("birads_category", 0))
+        best["zip_total_files"] = len(dicom_list)
+        best["zip_analyzed"] = len(results)
+        return best
+
+    # ── DICOM fayl ────────────────────────────────────────────────────────────
+    if (filename.endswith('.dcm') or filename.endswith('.dicom') or
+        content_type in ('application/dicom', 'application/octet-stream')):
+        img_bytes, _ = read_dicom(content)
+        is_valid, reason = is_medical_image(img_bytes)
+        if not is_valid:
+            raise HTTPException(422, {
+                "error": "DICOM rasm sifati past",
+                "message": reason,
+            })
+        result = run_ai_inference(img_bytes) if AI_AVAILABLE else mock_inference()
+        result["format"] = "DICOM"
+        return result
+
+    # ── Oddiy rasm (JPG/PNG) ──────────────────────────────────────────────────
+    allowed = {"image/jpeg", "image/png", "image/jpg"}
+    if content_type not in allowed and not filename.endswith(('.jpg','.jpeg','.png')):
+        raise HTTPException(400, (
+            "Qo'llab-quvvatlanadigan formatlar: JPG, PNG, DICOM (.dcm), ZIP arxiv. "
+            f"Yuklangan fayl: {filename or content_type}"
+        ))
+
+    is_valid, reason = is_medical_image(content)
+    if not is_valid:
+        raise HTTPException(422, {
+            "error": "Noto'g'ri rasm",
+            "message": reason,
+            "hint": "Iltimos, ultrasound (UZI) yoki mammografiya rasmi yuklang."
+        })
+
+    result = run_ai_inference(content) if AI_AVAILABLE else mock_inference()
+    result["format"] = "JPG/PNG"
+    return result
 
 @app.get("/api/patients")
 def get_patients():
