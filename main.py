@@ -47,10 +47,15 @@ ort_session = None
 try:
     import onnxruntime as ort
     # Bir necha joyda qidirish
+    import os
+    # Environment variable dan yoki avtomatik qidirish
+    env_path = os.environ.get("MODEL_PATH", "")
     possible_paths = [
-        Path("breast_ai_model.onnx"),
+        Path(env_path) if env_path else Path("nonexistent"),
         Path(__file__).parent / "breast_ai_model.onnx",
+        Path("breast_ai_model.onnx"),
         Path("/opt/render/project/src/breast_ai_model.onnx"),
+        Path("/opt/render/project/breast_ai_model.onnx"),
         Path("/app/breast_ai_model.onnx"),
     ]
     MODEL_PATH = None
