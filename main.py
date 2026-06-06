@@ -92,7 +92,7 @@ def read_dicom(dicom_bytes: bytes):
         raise HTTPException(422, f"DICOM faylni o'qib bo'lmadi: {str(e)}")
 
 
-def extract_zip_dicoms(zip_bytes: bytes) -> list[bytes]:
+def extract_zip_dicoms(zip_bytes: bytes) :
     """ZIP arxivdan DICOM fayllarni chiqarish"""
     dicom_files = []
     try:
@@ -123,7 +123,7 @@ def extract_zip_dicoms(zip_bytes: bytes) -> list[bytes]:
         raise HTTPException(400, "Noto'g'ri ZIP fayl")
 
 
-def is_medical_image(image_bytes: bytes) -> tuple[bool, str]:def is_medical_image(image_bytes: bytes) -> tuple[bool, str]:
+def is_medical_image(image_bytes: bytes):
     """
     Rasmning tibbiy ekanligini tekshirish.
     Ultrasound va mammografiya rasmlari odatda:
