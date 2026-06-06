@@ -143,52 +143,65 @@ def extract_zip_dicoms(zip_bytes: bytes) :
 
 def is_medical_image(image_bytes: bytes):
     """
-    Rasmning tibbiy ekanligini tekshirish.
-    Ultrasound va mammografiya rasmlari odatda:
-    - Ko'proq kulrang tonlarda bo'ladi
-    - Past rang to'yinganligi (saturation)
-    - Yuqori kontrast
-    - Ko'pincha qora fon
+    Tibbiy rasm validatsiyasi — qattiq mezonlar
+    UZI va mammografiya rasmlari:
+    - Kulrang/grayscale bo'ladi
+    - Qora fon ustida oq to'qima
+    - Rangli selfie/foto EMAS
     """
     from PIL import Image
     import numpy as np
 
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        img_small = img.resize((64, 64))
-        arr = np.array(img_small, dtype=np.float32)
+        w, h = img.size
 
+        # O'lcham tekshirish
+        if w < 50 or h < 50:
+            return False, f"Rasm juda kichik ({w}x{h}px). Kamida 50x50 piksel kerak."
+
+        img_small = img.resize((128, 128))
+        arr = np.array(img_small, dtype=np.float32)
         r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
 
-        # 1. Rang tekshirish — tibbiy rasmlar kulrang bo'ladi
-        # RGB kanallari orasidagi farq kichik bo'lishi kerak
-        rg_diff = np.mean(np.abs(r - g))
-        rb_diff = np.mean(np.abs(r - b))
-        gb_diff = np.mean(np.abs(g - b))
-        avg_color_diff = (rg_diff + rb_diff + gb_diff) / 3
+        # 1. Ranglilik tekshirish — eng muhim mezon
+        rg = np.mean(np.abs(r - g))
+        rb = np.mean(np.abs(r - b))
+        gb = np.mean(np.abs(g - b))
+        colorfulness = (rg + rb + gb) / 3
 
-        # Agar rang farqi katta bo'lsa — rangli rasm (tibbiy emas)
-        if avg_color_diff > 30:
-            return False, f"Rasm tibbiy emas: rang to'yinganligi yuqori ({avg_color_diff:.1f}). Ultrasound yoki mammografiya rasmi yuklang."
+        # Selfie, tabiat, odamlar rasmi — rangli bo'ladi (>25)
+        if colorfulness > 25:
+            return False, (
+                f"Bu rasm tibbiy emas (rang indeksi: {colorfulness:.1f}/25). "
+                f"Iltimos faqat UZI yoki mammografiya rasmini yuklang. "
+                f"Selfie, tabiat yoki boshqa rasmlar qabul qilinmaydi."
+            )
 
-        # 2. Qoralik tekshirish — tibbiy rasmlar ko'pincha qora fonga ega
+        # 2. Yorqinlik — juda yorqin rasmlar tibbiy emas
         brightness = np.mean(arr)
+        if brightness > 200:
+            return False, (
+                f"Rasm juda yorqin ({brightness:.0f}/200). "
+                f"UZI rasmlari odatda qorong'i fonli bo'ladi."
+            )
 
-        # Juda yorqin rasm (oddiy foto)
-        if brightness > 220:
-            return False, "Rasm juda yorqin. Ultrasound yoki mammografiya rasmi yuklang."
-
-        # 3. Kontrast tekshirish — tibbiy rasmlar yuqori kontrastga ega
+        # 3. Kontrast tekshirish
         gray = 0.299*r + 0.587*g + 0.114*b
         contrast = np.std(gray)
+        if contrast < 10:
+            return False, "Rasm kontrastsi juda past. Sifatli tibbiy rasm yuklang."
 
-        if contrast < 15:
-            return False, "Rasm kontrastsi past. Sifatli tibbiy rasm yuklang."
+        # 4. Qoralik ulushi — UZI rasmlarda qora piksellar ko'p
+        black_ratio = np.mean(gray < 30)
+        white_ratio = np.mean(gray > 225)
 
-        # 4. O'lcham tekshirish
-        w, h = img.size
-        if w < 100 or h < 100:
-            return False, f"Rasm o'lchami juda kichik ({w}x{h}). Kamida 100x100 piksel bo'lishi kerak."
+        # Agar rasm juda "toza" (fon yo'q) bo'lsa — tibbiy emas ehtimoli
+        if white_ratio > 0.7:
+            return False, (
+                "Rasm deyarli to'liq oq. "
+                "UZI yoki mammografiya rasmi yuklang."
+            )
 
         return True, "OK"
 
