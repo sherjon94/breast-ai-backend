@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+breast_ai.db
+*.db
+test_*.jpg
+test_*.png
+.venv/
+venv/
+busi.zip
+busi_data/
+breast_ai_model_OLD_broken.onnx
+*.pth
