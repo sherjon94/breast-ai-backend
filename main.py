@@ -26,7 +26,7 @@ import os
 app = FastAPI(
     title="Breast AI API",
     description="Multimodal sut bezi diagnostikasi — UZI + Mammografiya + AI",
-    version="3.0.0",
+    version="3.2.0",
 )
 
 app.add_middleware(
@@ -832,7 +832,7 @@ def health():
         "seg_model_loaded": SEG_AVAILABLE,
         "classes": CLASSES,
         "n_classes": len(CLASSES),
-        "version": "3.1.0",
+        "version": "3.2.0",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
