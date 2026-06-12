@@ -13,8 +13,11 @@ import json
 import random
 import sqlite3
 import base64
+import hashlib
+import secrets
+import hmac
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import io
 import zipfile
@@ -65,6 +68,22 @@ def malignant_subcat(p_malignant: float) -> str:
     if p_malignant >= 0.50: return "4a"
     if p_malignant >= 0.10: return "3"
     return "2"
+
+
+# BI-RADS bo'yicha qayta ko'rik intervali (oy) — ACR ko'rsatmalariga yaqin
+FOLLOWUP_MONTHS = {1: 12, 2: 12, 3: 6, "4a": 3, "4b": 1, "4c": 1, 4: 3, 5: 0, 6: 0}
+
+def followup_recommendation(birads_category: int, subcat: str = None):
+    """Qayta ko'rik tavsiyasi: necha oydan keyin va matn"""
+    key = subcat if subcat in ("4a", "4b", "4c") else birads_category
+    months = FOLLOWUP_MONTHS.get(key, FOLLOWUP_MONTHS.get(birads_category, 6))
+    if months == 0:
+        text = "Tezkor — biopsi/onkolog konsultatsiyasi zudlik bilan"
+        next_date = datetime.utcnow().date().isoformat()
+    else:
+        text = f"{months} oydan keyin qayta ko'rik tavsiya etiladi"
+        next_date = (datetime.utcnow() + timedelta(days=months * 30)).date().isoformat()
+    return {"followup_months": months, "followup_text": text, "next_checkup_date": next_date}
 
 
 # ONNX model yuklash
@@ -127,6 +146,7 @@ DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).parent / "breast_ai.db"))
 
 def db():
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE IF NOT EXISTS analyses(
         id TEXT PRIMARY KEY,
         created_at TEXT,
@@ -142,7 +162,67 @@ def db():
     cols = [r[1] for r in conn.execute("PRAGMA table_info(analyses)").fetchall()]
     if "doctor_id" not in cols:
         conn.execute("ALTER TABLE analyses ADD COLUMN doctor_id TEXT")
+    # Foydalanuvchilar (shifokor/admin)
+    conn.execute("""CREATE TABLE IF NOT EXISTS users(
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        phone TEXT UNIQUE,
+        specialization TEXT,
+        clinic TEXT,
+        license TEXT,
+        password_hash TEXT,
+        salt TEXT,
+        role TEXT,
+        approved INTEGER DEFAULT 0,
+        token TEXT,
+        created_at TEXT)""")
     return conn
+
+
+# ─── AUTH (rol asosida: admin / doctor) ──────────────────────────────────────
+
+def hash_password(password: str, salt: str = None):
+    if salt is None:
+        salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
+    return h.hex(), salt
+
+
+def verify_password(password: str, password_hash: str, salt: str) -> bool:
+    h, _ = hash_password(password, salt)
+    return hmac.compare_digest(h, password_hash)
+
+
+def user_public(row: dict) -> dict:
+    """Parolsiz foydalanuvchi ma'lumoti"""
+    return {k: row[k] for k in ("id", "name", "phone", "specialization", "clinic", "license", "role", "approved", "created_at")}
+
+
+def user_by_token(token: str):
+    if not token:
+        return None
+    conn = db()
+    try:
+        r = conn.execute("SELECT * FROM users WHERE token=?", (token,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def require_user(token: str):
+    u = user_by_token(token)
+    if not u:
+        raise HTTPException(401, "Avtorizatsiya talab qilinadi — qaytadan kiring")
+    if not u.get("approved"):
+        raise HTTPException(403, "Hisobingiz hali admin tomonidan tasdiqlanmagan")
+    return u
+
+
+def require_admin(token: str):
+    u = require_user(token)
+    if u.get("role") != "admin":
+        raise HTTPException(403, "Faqat admin uchun")
+    return u
 
 
 # ─── RASM O'QISH / VALIDATSIYA ────────────────────────────────────────────────
@@ -305,6 +385,7 @@ def build_ai_result(probs: np.ndarray, birads_score: float, threshold: float = 0
         "class_probabilities":  {CLASSES[i]: round(float(probs[i]), 4) for i in range(len(CLASSES))},
         "operating_point":      threshold,
         "flagged_malignant":    bool(p_malignant >= threshold),
+        **followup_recommendation(meta["category"], sub),
         "birads_score":  round(birads_score, 4),
         "ai_model_used": True,
         "demo":          False,
@@ -656,6 +737,26 @@ class BiRadsResult(BaseModel):
     findings_summary: list[str]
     analysis_id: str
     analyzed_at: str
+    followup_months: Optional[int] = None
+    followup_text: Optional[str] = None
+    next_checkup_date: Optional[str] = None
+
+class RegisterRequest(BaseModel):
+    name: str
+    phone: str
+    password: str
+    specialization: Optional[str] = ""
+    clinic: Optional[str] = ""
+    license: Optional[str] = ""
+
+class LoginRequest(BaseModel):
+    phone: str
+    password: str
+
+class ApproveRequest(BaseModel):
+    token: str
+    doctor_id: str
+    approved: bool
 
 # ─── SCORING ──────────────────────────────────────────────────────────────────
 
@@ -744,7 +845,7 @@ async def analyze_uzi(req: UziRequest):
     return BiRadsResult(category=cat, subcategory=sub, label=label, malignancy_risk_pct=risk,
         recommendation=rec, confidence=conf, is_in_situ=in_situ,
         findings_summary=findings, analysis_id=str(uuid.uuid4())[:8],
-        analyzed_at=datetime.utcnow().isoformat())
+        analyzed_at=datetime.utcnow().isoformat(), **followup_recommendation(cat, sub))
 
 @app.post("/api/analyze/mammo", response_model=BiRadsResult)
 async def analyze_mammo(req: MammoRequest):
@@ -754,7 +855,7 @@ async def analyze_mammo(req: MammoRequest):
     return BiRadsResult(category=cat, subcategory=sub, label=label, malignancy_risk_pct=risk,
         recommendation=rec, confidence=conf, is_in_situ=False,
         findings_summary=findings, analysis_id=str(uuid.uuid4())[:8],
-        analyzed_at=datetime.utcnow().isoformat())
+        analyzed_at=datetime.utcnow().isoformat(), **followup_recommendation(cat, sub))
 
 @app.post("/api/analyze/combined", response_model=BiRadsResult)
 async def analyze_combined(req: CombinedRequest):
@@ -771,7 +872,7 @@ async def analyze_combined(req: CombinedRequest):
     return BiRadsResult(category=final_cat, subcategory=sub, label=label, malignancy_risk_pct=risk,
         recommendation=rec, confidence=final_conf, is_in_situ=in_situ,
         findings_summary=all_f, analysis_id=str(uuid.uuid4())[:8],
-        analyzed_at=datetime.utcnow().isoformat())
+        analyzed_at=datetime.utcnow().isoformat(), **followup_recommendation(final_cat, sub))
 
 
 async def _read_validated_image(file: UploadFile) -> bytes:
@@ -884,6 +985,101 @@ async def segment_image(file: UploadFile = File(...)):
     return classical_segmentation(img_bytes)
 
 
+# ─── AUTH ENDPOINTLAR ─────────────────────────────────────────────────────────
+
+@app.post("/api/auth/register")
+def register(req: RegisterRequest):
+    if len(req.password) < 4:
+        raise HTTPException(400, "Parol kamida 4 belgidan iborat bo'lsin")
+    conn = db()
+    try:
+        existing = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if conn.execute("SELECT 1 FROM users WHERE phone=?", (req.phone,)).fetchone():
+            raise HTTPException(409, "Bu telefon raqami allaqachon ro'yxatdan o'tgan")
+        # Birinchi foydalanuvchi = admin (avtomatik tasdiqlangan)
+        is_admin = existing == 0
+        ph, salt = hash_password(req.password)
+        uid = str(uuid.uuid4())[:12]
+        token = secrets.token_hex(24) if is_admin else None
+        conn.execute(
+            "INSERT INTO users(id,name,phone,specialization,clinic,license,password_hash,salt,role,approved,token,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (uid, req.name.strip(), req.phone.strip(), req.specialization, req.clinic, req.license,
+             ph, salt, "admin" if is_admin else "doctor", 1 if is_admin else 0, token,
+             datetime.utcnow().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    if is_admin:
+        return {"registered": True, "role": "admin", "approved": True, "token": token,
+                "user": {"id": uid, "name": req.name, "phone": req.phone, "role": "admin", "approved": 1},
+                "message": "Admin sifatida ro'yxatdan o'tdingiz"}
+    return {"registered": True, "role": "doctor", "approved": False,
+            "message": "Ro'yxatdan o'tdingiz. Admin tasdiqlashini kuting."}
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    conn = db()
+    try:
+        r = conn.execute("SELECT * FROM users WHERE phone=?", (req.phone.strip(),)).fetchone()
+        if not r:
+            raise HTTPException(401, "Telefon yoki parol noto'g'ri")
+        u = dict(r)
+        if not verify_password(req.password, u["password_hash"], u["salt"]):
+            raise HTTPException(401, "Telefon yoki parol noto'g'ri")
+        if not u["approved"]:
+            raise HTTPException(403, "Hisobingiz hali admin tomonidan tasdiqlanmagan")
+        token = secrets.token_hex(24)
+        conn.execute("UPDATE users SET token=? WHERE id=?", (token, u["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"token": token, "user": user_public(u)}
+
+
+@app.get("/api/auth/me")
+def auth_me(token: str):
+    u = require_user(token)
+    return {"user": user_public(u)}
+
+
+@app.post("/api/auth/logout")
+def logout(token: str):
+    conn = db()
+    try:
+        conn.execute("UPDATE users SET token=NULL WHERE token=?", (token,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+# ─── ADMIN ENDPOINTLAR ────────────────────────────────────────────────────────
+
+@app.get("/api/admin/doctors")
+def admin_doctors(token: str):
+    require_admin(token)
+    conn = db()
+    try:
+        rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+    finally:
+        conn.close()
+    return {"doctors": [user_public(dict(r)) for r in rows]}
+
+
+@app.post("/api/admin/approve")
+def admin_approve(req: ApproveRequest):
+    require_admin(req.token)
+    conn = db()
+    try:
+        conn.execute("UPDATE users SET approved=? WHERE id=?", (1 if req.approved else 0, req.doctor_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "doctor_id": req.doctor_id, "approved": req.approved}
+
+
 # ─── TARIX (SQLITE) ───────────────────────────────────────────────────────────
 
 @app.post("/api/history")
@@ -914,8 +1110,19 @@ def save_history(record: dict):
     return {"saved": True, "id": record["id"]}
 
 
+def resolve_scope(token: Optional[str], doctor: Optional[str]) -> Optional[str]:
+    """Rol asosida ko'rish doirasi: doctor -> faqat o'zi; admin -> ?doctor yoki barchasi."""
+    if token:
+        u = require_user(token)
+        if u.get("role") != "admin":
+            return u["id"]  # shifokor faqat o'z bemorlarini ko'radi
+        return doctor  # admin: ?doctor bo'lsa filtr, bo'lmasa barchasi
+    return doctor
+
+
 @app.get("/api/history")
-def list_history(limit: int = 200, doctor: Optional[str] = None):
+def list_history(limit: int = 200, doctor: Optional[str] = None, token: Optional[str] = None):
+    doctor = resolve_scope(token, doctor)
     conn = db()
     try:
         if doctor:
@@ -950,7 +1157,8 @@ def delete_history_item(record_id: str):
 
 
 @app.delete("/api/history")
-def clear_history(doctor: Optional[str] = None):
+def clear_history(doctor: Optional[str] = None, token: Optional[str] = None):
+    doctor = resolve_scope(token, doctor)
     conn = db()
     try:
         if doctor:
@@ -965,8 +1173,9 @@ def clear_history(doctor: Optional[str] = None):
 
 
 @app.get("/api/patients")
-def get_patients(doctor: Optional[str] = None):
+def get_patients(doctor: Optional[str] = None, token: Optional[str] = None):
     """Bazadagi real bemorlar — har bir bemor uchun oxirgi tahlil"""
+    doctor = resolve_scope(token, doctor)
     conn = db()
     try:
         if doctor:
@@ -990,8 +1199,9 @@ def get_patients(doctor: Optional[str] = None):
 
 
 @app.get("/api/stats")
-def get_stats(doctor: Optional[str] = None):
+def get_stats(doctor: Optional[str] = None, token: Optional[str] = None):
     """Real statistika — SQLite bazadan hisoblanadi"""
+    doctor = resolve_scope(token, doctor)
     conn = db()
     w = " WHERE doctor_id=?" if doctor else ""
     p = (doctor,) if doctor else ()
