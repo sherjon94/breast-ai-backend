@@ -35,7 +35,10 @@ app.add_middleware(
 
 # ─── AI MODEL ─────────────────────────────────────────────────────────────────
 
-# DIQQAT: ONNX model 2 klassli — class_probs shape [1, 2] = [benign, malignant]
+# Model 2 yoki 3 klassli bo'lishi mumkin — yuklashda avtomatik aniqlanadi.
+# Klass tartibi: malignant DOIM oxirgi indeks.
+#   2-klass: [benign, malignant]
+#   3-klass: [normal, benign, malignant]
 CLASSES = ["benign", "malignant"]
 
 IMG_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -44,6 +47,7 @@ IMG_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 # BI-RADS subkategoriyalar — malignant ehtimolga qarab
 # 4a: past shubha (2-10%), 4b: o'rta (10-50%), 4c: yuqori (50-95%)
 SUBCAT_META = {
+    "1":  {"category": 1, "label": "Negativ (normal)",      "risk": 0.0,  "rec": "Muntazam skrining"},
     "2":  {"category": 2, "label": "Xavfsiz",                "risk": 0.0,  "rec": "1-2 yilda 1 marta tekshiruv"},
     "3":  {"category": 3, "label": "Ehtimol xavfsiz",        "risk": 2.0,  "rec": "6 oyda UZI nazorat"},
     "4a": {"category": 4, "label": "Past shubha (4a)",       "risk": 8.0,  "rec": "Biopsi tavsiya etiladi"},
@@ -53,8 +57,8 @@ SUBCAT_META = {
 }
 
 
-def birads_from_probs(p_benign: float, p_malignant: float) -> str:
-    """2 klassli model ehtimollaridan BI-RADS subkategoriya"""
+def malignant_subcat(p_malignant: float) -> str:
+    """Malignant ehtimolidan BI-RADS subkategoriya (4a/4b/4c)"""
     if p_malignant >= 0.97: return "5"
     if p_malignant >= 0.90: return "4c"
     if p_malignant >= 0.75: return "4b"
@@ -66,6 +70,7 @@ def birads_from_probs(p_benign: float, p_malignant: float) -> str:
 # ONNX model yuklash
 AI_AVAILABLE = False
 ort_session = None
+N_CLASSES = 2
 
 try:
     import onnxruntime as ort
@@ -87,7 +92,11 @@ try:
     if MODEL_PATH:
         ort_session = ort.InferenceSession(str(MODEL_PATH))
         AI_AVAILABLE = True
-        print("[OK] AI model yuklandi:", str(MODEL_PATH))
+        # Klass sonini model chiqishidan avtomatik aniqlash
+        out_shape = ort_session.get_outputs()[0].shape
+        N_CLASSES = int(out_shape[-1]) if isinstance(out_shape[-1], int) else 2
+        CLASSES = ["normal", "benign", "malignant"] if N_CLASSES == 3 else ["benign", "malignant"]
+        print(f"[OK] AI model yuklandi ({N_CLASSES} klass: {CLASSES}):", str(MODEL_PATH))
     else:
         print("[!] ONNX model topilmadi — mock rejim")
 except ImportError:
@@ -127,7 +136,12 @@ def db():
         modality TEXT,
         confidence REAL,
         is_in_situ INTEGER,
+        doctor_id TEXT,
         data TEXT)""")
+    # Migratsiya: eski bazaga doctor_id ustunini qo'shish
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(analyses)").fetchall()]
+    if "doctor_id" not in cols:
+        conn.execute("ALTER TABLE analyses ADD COLUMN doctor_id TEXT")
     return conn
 
 
@@ -261,51 +275,57 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
 
 
 def infer_probs(arr_hwc_255: np.ndarray):
-    """224x224 HWC array -> (p_benign, p_malignant, birads_score)"""
+    """224x224 HWC array -> (probs[N_CLASSES], birads_score). Malignant = oxirgi indeks."""
     outputs = ort_session.run(None, {"image": normalize_for_model(arr_hwc_255)})
     probs, birads_score = outputs
-    return float(probs[0][0]), float(probs[0][1]), float(birads_score[0][0])
+    return probs[0].astype(float), float(birads_score[0][0])
 
 
-def build_ai_result(p_benign: float, p_malignant: float, birads_score: float) -> dict:
-    pred_class = CLASSES[int(p_malignant >= p_benign)]
-    confidence = max(p_benign, p_malignant)
-    sub = birads_from_probs(p_benign, p_malignant)
+def build_ai_result(probs: np.ndarray, birads_score: float, threshold: float = 0.5) -> dict:
+    p_malignant = float(probs[-1])
+    pred_idx = int(np.argmax(probs))
+    pred_class = CLASSES[pred_idx]
+
+    # 3-klassda aniq "normal" bashorat -> BI-RADS 1
+    if len(CLASSES) == 3 and pred_class == "normal" and float(probs[0]) >= 0.5:
+        sub = "1"
+    else:
+        sub = malignant_subcat(p_malignant)
     meta = SUBCAT_META[sub]
 
     return {
         "predicted_class":      pred_class,
-        "confidence":           round(confidence, 4),
+        "confidence":           round(float(probs.max()), 4),
         "birads_category":      meta["category"],
         "birads_subcategory":   sub,
         "birads_label":         meta["label"],
         "malignancy_risk_pct":  meta["risk"],
         "recommendation":       meta["rec"],
         "is_in_situ":           False,  # o'lcham ma'lumotisiz aniqlab bo'lmaydi — frontend hisoblaydi
-        "class_probabilities": {
-            "benign":    round(p_benign, 4),
-            "malignant": round(p_malignant, 4),
-        },
+        "class_probabilities":  {CLASSES[i]: round(float(probs[i]), 4) for i in range(len(CLASSES))},
+        "operating_point":      threshold,
+        "flagged_malignant":    bool(p_malignant >= threshold),
         "birads_score":  round(birads_score, 4),
         "ai_model_used": True,
         "demo":          False,
+        "n_classes":     len(CLASSES),
         "analysis_id":   str(uuid.uuid4())[:8],
         "analyzed_at":   datetime.utcnow().isoformat(),
     }
 
 
-def run_ai_inference(image_bytes: bytes) -> dict:
+def run_ai_inference(image_bytes: bytes, threshold: float = 0.5) -> dict:
     from PIL import Image
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
-    p_b, p_m, score = infer_probs(np.array(img, dtype=np.float32))
-    return build_ai_result(p_b, p_m, score)
+    probs, score = infer_probs(np.array(img, dtype=np.float32))
+    return build_ai_result(probs, score, threshold)
 
 
 def mock_inference() -> dict:
     """AI model yo'q bo'lganda DEMO natija — tasodifiy, klinik ahamiyatga ega EMAS"""
     p_m = round(random.uniform(0.05, 0.95), 4)
     p_b = round(1 - p_m, 4)
-    sub = birads_from_probs(p_b, p_m)
+    sub = malignant_subcat(p_m)
     meta = SUBCAT_META[sub]
     return {
         "predicted_class":     "malignant" if p_m >= 0.5 else "benign",
@@ -317,9 +337,12 @@ def mock_inference() -> dict:
         "recommendation":      "DEMO REJIM — bu natija tasodifiy, klinik qaror uchun ishlatmang!",
         "is_in_situ":          False,
         "class_probabilities": {"benign": p_b, "malignant": p_m},
+        "operating_point":     0.5,
+        "flagged_malignant":   bool(p_m >= 0.5),
         "birads_score":  round(random.uniform(0.2, 0.8), 4),
         "ai_model_used": False,
         "demo":          True,
+        "n_classes":     len(CLASSES),
         "analysis_id":   str(uuid.uuid4())[:8],
         "analyzed_at":   datetime.utcnow().isoformat(),
     }
@@ -343,10 +366,10 @@ def occlusion_heatmap(image_bytes: bytes, grid: int = 7) -> dict:
     orig_w, orig_h = img.size
 
     base224 = np.array(img.resize((224, 224)), dtype=np.float32)
-    p_b, p_m, score = infer_probs(base224)
-    base_result = build_ai_result(p_b, p_m, score)
-    target_idx = 1 if p_m >= p_b else 0
-    base_p = max(p_b, p_m)
+    probs, score = infer_probs(base224)
+    base_result = build_ai_result(probs, score)
+    target_idx = int(np.argmax(probs))   # bashorat qilingan klass
+    base_p = float(probs[target_idx])
 
     cell = 224 // grid
     heat = np.zeros((grid, grid), dtype=np.float32)
@@ -358,9 +381,8 @@ def occlusion_heatmap(image_bytes: bytes, grid: int = 7) -> dict:
             y0, y1 = gy * cell, 224 if gy == grid - 1 else (gy + 1) * cell
             x0, x1 = gx * cell, 224 if gx == grid - 1 else (gx + 1) * cell
             occluded[y0:y1, x0:x1] = mean_color
-            pb2, pm2, _ = infer_probs(occluded)
-            p = pm2 if target_idx == 1 else pb2
-            heat[gy, gx] = max(0.0, base_p - p)
+            probs2, _ = infer_probs(occluded)
+            heat[gy, gx] = max(0.0, base_p - float(probs2[target_idx]))
 
     if heat.max() > 1e-9:
         heat = heat / heat.max()
@@ -708,7 +730,8 @@ def health():
         "ai_model_loaded": AI_AVAILABLE,
         "seg_model_loaded": SEG_AVAILABLE,
         "classes": CLASSES,
-        "version": "3.0.0",
+        "n_classes": len(CLASSES),
+        "version": "3.1.0",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -772,8 +795,9 @@ async def _read_validated_image(file: UploadFile) -> bytes:
 
 
 @app.post("/api/analyze/image")
-async def analyze_image(file: UploadFile = File(...)):
-    """Rasm yuklash: JPG, PNG, DICOM (.dcm), ZIP arxiv"""
+async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5):
+    """Rasm yuklash: JPG, PNG, DICOM (.dcm), ZIP arxiv.
+    threshold — operating point (skrining=0.3 yuqori sezgirlik, tasdiqlash=0.7 yuqori spesifiklik)"""
     content = await file.read()
     filename = (file.filename or "").lower()
     content_type = file.content_type or ""
@@ -795,7 +819,7 @@ async def analyze_image(file: UploadFile = File(...)):
 
                 is_valid, reason = is_medical_image(img_bytes)
                 if is_valid:
-                    result = run_ai_inference(img_bytes) if AI_AVAILABLE else mock_inference()
+                    result = run_ai_inference(img_bytes, threshold) if AI_AVAILABLE else mock_inference()
                     result["filename"] = name
                     results.append(result)
             except Exception:
@@ -816,7 +840,7 @@ async def analyze_image(file: UploadFile = File(...)):
         is_valid, reason = is_medical_image(img_bytes)
         if not is_valid:
             raise HTTPException(422, {"error": "DICOM rasm sifati past", "message": reason})
-        result = run_ai_inference(img_bytes) if AI_AVAILABLE else mock_inference()
+        result = run_ai_inference(img_bytes, threshold) if AI_AVAILABLE else mock_inference()
         result["format"] = "DICOM"
         return result
 
@@ -833,7 +857,7 @@ async def analyze_image(file: UploadFile = File(...)):
         raise HTTPException(422, {"error": "Noto'g'ri rasm", "message": reason,
                                   "hint": "Iltimos, ultrasound (UZI) yoki mammografiya rasmi yuklang."})
 
-    result = run_ai_inference(content) if AI_AVAILABLE else mock_inference()
+    result = run_ai_inference(content, threshold) if AI_AVAILABLE else mock_inference()
     result["format"] = "JPG/PNG"
     return result
 
@@ -869,8 +893,8 @@ def save_history(record: dict):
     conn = db()
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO analyses(id, created_at, patient_name, patient_age, birads, modality, confidence, is_in_situ, data) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO analyses(id, created_at, patient_name, patient_age, birads, modality, confidence, is_in_situ, doctor_id, data) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 str(record["id"]),
                 record.get("date") or datetime.utcnow().isoformat(),
@@ -880,6 +904,7 @@ def save_history(record: dict):
                 record.get("modality") or "",
                 float(record.get("confidence") or 0),
                 1 if record.get("isInSitu") else 0,
+                record.get("doctorId") or "",
                 json.dumps(record, ensure_ascii=False),
             ),
         )
@@ -890,12 +915,17 @@ def save_history(record: dict):
 
 
 @app.get("/api/history")
-def list_history(limit: int = 200):
+def list_history(limit: int = 200, doctor: Optional[str] = None):
     conn = db()
     try:
-        rows = conn.execute(
-            "SELECT data FROM analyses ORDER BY created_at DESC LIMIT ?", (min(limit, 500),)
-        ).fetchall()
+        if doctor:
+            rows = conn.execute(
+                "SELECT data FROM analyses WHERE doctor_id=? ORDER BY created_at DESC LIMIT ?",
+                (doctor, min(limit, 500))).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT data FROM analyses ORDER BY created_at DESC LIMIT ?", (min(limit, 500),)
+            ).fetchall()
     finally:
         conn.close()
     records = []
@@ -920,10 +950,13 @@ def delete_history_item(record_id: str):
 
 
 @app.delete("/api/history")
-def clear_history():
+def clear_history(doctor: Optional[str] = None):
     conn = db()
     try:
-        cur = conn.execute("DELETE FROM analyses")
+        if doctor:
+            cur = conn.execute("DELETE FROM analyses WHERE doctor_id=?", (doctor,))
+        else:
+            cur = conn.execute("DELETE FROM analyses")
         conn.commit()
         deleted = cur.rowcount
     finally:
@@ -932,15 +965,21 @@ def clear_history():
 
 
 @app.get("/api/patients")
-def get_patients():
+def get_patients(doctor: Optional[str] = None):
     """Bazadagi real bemorlar — har bir bemor uchun oxirgi tahlil"""
     conn = db()
     try:
-        rows = conn.execute(
-            "SELECT patient_name, patient_age, birads, modality, MAX(created_at) "
-            "FROM analyses WHERE patient_name != '' GROUP BY patient_name "
-            "ORDER BY MAX(created_at) DESC LIMIT 100"
-        ).fetchall()
+        if doctor:
+            rows = conn.execute(
+                "SELECT patient_name, patient_age, birads, modality, MAX(created_at) "
+                "FROM analyses WHERE patient_name != '' AND doctor_id=? GROUP BY patient_name "
+                "ORDER BY MAX(created_at) DESC LIMIT 100", (doctor,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT patient_name, patient_age, birads, modality, MAX(created_at) "
+                "FROM analyses WHERE patient_name != '' GROUP BY patient_name "
+                "ORDER BY MAX(created_at) DESC LIMIT 100"
+            ).fetchall()
     finally:
         conn.close()
     patients = [
@@ -951,16 +990,18 @@ def get_patients():
 
 
 @app.get("/api/stats")
-def get_stats():
+def get_stats(doctor: Optional[str] = None):
     """Real statistika — SQLite bazadan hisoblanadi"""
     conn = db()
+    w = " WHERE doctor_id=?" if doctor else ""
+    p = (doctor,) if doctor else ()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM analyses").fetchone()[0]
-        urgent = conn.execute("SELECT COUNT(*) FROM analyses WHERE birads>=4").fetchone()[0]
-        in_situ = conn.execute("SELECT COUNT(*) FROM analyses WHERE is_in_situ=1").fetchone()[0]
-        avg_conf = conn.execute("SELECT AVG(confidence) FROM analyses").fetchone()[0] or 0
-        birads_rows = conn.execute("SELECT birads, COUNT(*) FROM analyses GROUP BY birads").fetchall()
-        modality_rows = conn.execute("SELECT modality, COUNT(*) FROM analyses GROUP BY modality").fetchall()
+        total = conn.execute(f"SELECT COUNT(*) FROM analyses{w}", p).fetchone()[0]
+        urgent = conn.execute(f"SELECT COUNT(*) FROM analyses WHERE birads>=4" + (" AND doctor_id=?" if doctor else ""), p).fetchone()[0]
+        in_situ = conn.execute(f"SELECT COUNT(*) FROM analyses WHERE is_in_situ=1" + (" AND doctor_id=?" if doctor else ""), p).fetchone()[0]
+        avg_conf = conn.execute(f"SELECT AVG(confidence) FROM analyses{w}", p).fetchone()[0] or 0
+        birads_rows = conn.execute(f"SELECT birads, COUNT(*) FROM analyses{w} GROUP BY birads", p).fetchall()
+        modality_rows = conn.execute(f"SELECT modality, COUNT(*) FROM analyses{w} GROUP BY modality", p).fetchall()
     finally:
         conn.close()
     return {

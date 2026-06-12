@@ -10,3 +10,6 @@ busi.zip
 busi_data/
 breast_ai_model_OLD_broken.onnx
 *.pth
+cv_metrics.json
+comparison.json
+smoke_*.png

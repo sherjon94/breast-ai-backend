@@ -34,33 +34,50 @@ breast_ai_backend/
 
 ## Modelni o'qitish va baholash (PhD uchun muhim)
 
-Dataset: BUSI (Al-Dhabyani 2020) — `Dataset_BUSI_with_GT/{benign,malignant,normal}/`.
+Dataset: BUSI (Al-Dhabyani 2020) — `Dataset_BUSI_with_GT/{normal,benign,malignant}/`.
+Yuklab olish (Kaggle auth'siz): HuggingFace `gymprathap/Breast-Cancer-Ultrasound-Images-Dataset`.
 
-### 1. Klassifikator o'qitish (benign/malignant)
+### To'liq eksperiment (tavsiya etiladi)
 ```bash
-python train_classifier.py busi_data/Dataset_BUSI_with_GT
-# → breast_ai_model.onnx (yangi, haqiqiy model) + metrics.json (TEST to'plami)
+python run_experiments.py
+# 1) Arxitektura taqqoslovi: MobileNetV3 / ResNet18 / EfficientNet-B0
+# 2) Eng yaxshisini tanlaydi (cancer AUC bo'yicha)
+# 3) 5-fold cross-validation (95% CI)
+# 4) Yakuniy model + ONNX + metrics.json (CV va taqqoslov bilan)
 ```
-MobileNetV3-Small, ImageNet pretrained, stratified 70/15/15 split (seed=42).
-TEST to'plami o'qitishda ko'rilmaydi — metrics.json data leakage'siz halol.
 
-### 2. Segmentatsiya U-Net o'qitish (ixtiyoriy)
+### Yagona `train.py` (moslashuvchan)
+```bash
+# Yakuniy model (3-klass: normal/benign/malignant) + ONNX + metrics.json:
+python train.py --arch efficientnet_b0 --classes 3 --epochs 28 --export
+# 5-fold cross-validation (95% CI):
+python train.py --arch efficientnet_b0 --classes 3 --folds 5 --epochs 12
+# Arxitektura taqqoslovi uchun bitta arxitektura:
+python train.py --arch resnet18 --classes 3 --epochs 10 --compare
+```
+Xususiyatlari: focal loss, augmentatsiya, test-time augmentation (TTA),
+stratified split (seed=42, test held-out), ONNX eksport (eski interfeysga mos).
+Model 2 yoki 3 klassli bo'lishi mumkin — backend chiqishdan avtomatik aniqlaydi.
+
+### Segmentatsiya U-Net (ixtiyoriy)
 ```bash
 python train_segmentation.py busi_data/Dataset_BUSI_with_GT
 # → breast_ai_seg.onnx — /api/segment avtomatik ishlatadi
 ```
 
-### 3. Faqat baholash (mavjud modelni test qilish)
-```bash
-python evaluate.py busi_data/Dataset_BUSI_with_GT  # → metrics.json
-```
-
 ### Deploy
 ```bash
-git add breast_ai_model.onnx breast_ai_seg.onnx metrics.json
+git add breast_ai_model.onnx breast_ai_seg.onnx metrics.json main.py
 git commit -m "Real BUSI-trained model + metrics" && git push
 # Render avtomatik deploy, frontend Statistika sahifasida metrikalarni ko'rsatadi
 ```
+
+## Yangi imkoniyatlar (v3.1)
+
+- **3-klass model** (normal/benign/malignant) — backend adaptiv (2 yoki 3 klass)
+- **Operating point** — `/api/analyze/image?threshold=0.3` (skrining: yuqori sezgirlik) yoki `0.7` (tasdiqlash: yuqori spesifiklik)
+- **Cross-validation + 95% CI** va **arxitektura taqqoslovi** — `/api/metrics` qaytaradi, frontend ko'rsatadi
+- **Ko'p shifokor** — `?doctor=<id>` filtri (`/api/history`, `/api/patients`, `/api/stats`); har shifokor o'z bemorlarini ko'radi
 
 ## Local ishga tushirish
 
