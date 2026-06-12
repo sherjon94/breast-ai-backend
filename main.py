@@ -859,6 +859,7 @@ def health():
         "classes": CLASSES,
         "n_classes": len(CLASSES),
         "version": "3.2.0",
+        "db": "postgres" if IS_PG else "sqlite",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
