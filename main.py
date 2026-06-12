@@ -183,6 +183,9 @@ def _ensure_tables(conn):
         id TEXT PRIMARY KEY, name TEXT, phone TEXT UNIQUE, specialization TEXT,
         clinic TEXT, license TEXT, password_hash TEXT, salt TEXT, role TEXT,
         approved INTEGER DEFAULT 0, token TEXT, created_at TEXT)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS reports(
+        id TEXT PRIMARY KEY, doctor_id TEXT, doctor_name TEXT, text TEXT,
+        resolved INTEGER DEFAULT 0, created_at TEXT)""")
     if IS_PG:
         conn.execute("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS doctor_id TEXT")
     else:
@@ -784,6 +787,10 @@ class ApproveRequest(BaseModel):
     doctor_id: str
     approved: bool
 
+class ReportRequest(BaseModel):
+    token: str
+    text: str
+
 # ─── SCORING ──────────────────────────────────────────────────────────────────
 
 def score_uzi(req: UziRequest):
@@ -1105,6 +1112,47 @@ def admin_approve(req: ApproveRequest):
     finally:
         conn.close()
     return {"ok": True, "doctor_id": req.doctor_id, "approved": req.approved}
+
+
+# ─── MUAMMO BILDIRISH (REPORTS) ───────────────────────────────────────────────
+
+@app.post("/api/report")
+def submit_report(req: ReportRequest):
+    u = require_user(req.token)
+    if not req.text.strip():
+        raise HTTPException(400, "Muammo matnini kiriting")
+    conn = db()
+    try:
+        conn.execute("INSERT INTO reports(id, doctor_id, doctor_name, text, resolved, created_at) VALUES (?,?,?,?,?,?)",
+                     (str(uuid.uuid4())[:12], u["id"], u.get("name") or "", req.text.strip(), 0, datetime.utcnow().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/admin/reports")
+def admin_reports(token: str):
+    require_admin(token)
+    conn = db()
+    try:
+        rows = conn.execute("SELECT * FROM reports ORDER BY created_at DESC LIMIT 200").fetchall()
+    finally:
+        conn.close()
+    return {"reports": [dict(r) for r in rows]}
+
+
+@app.post("/api/admin/report-resolve")
+def admin_report_resolve(req: ApproveRequest):
+    # req.doctor_id = report_id, req.approved = resolved holati (ApproveRequest qayta ishlatildi)
+    require_admin(req.token)
+    conn = db()
+    try:
+        conn.execute("UPDATE reports SET resolved=? WHERE id=?", (1 if req.approved else 0, req.doctor_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
 
 
 # ─── TARIX (SQLITE) ───────────────────────────────────────────────────────────
