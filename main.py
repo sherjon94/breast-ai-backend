@@ -137,45 +137,71 @@ except Exception as e:
     print(f"[!] Seg model: {e}")
 
 
-# ─── SQLITE TARIX BAZASI ──────────────────────────────────────────────────────
-# Eslatma: Render free tier diski efemer — redeploy da ma'lumot yo'qoladi.
-# localStorage frontend'da asosiy zaxira bo'lib qoladi (ikki tomonlama sync).
+# ─── TARIX BAZASI (SQLite lokal / PostgreSQL Render) ──────────────────────────
+# DATABASE_URL bo'lsa PostgreSQL (doimiy), bo'lmasa SQLite (lokal/efemer).
 
 DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).parent / "breast_ai.db"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+IS_PG = bool(DATABASE_URL)
+
+if IS_PG:
+    import psycopg
+
+    class HybridRow:
+        """sqlite3.Row kabi — ham pozitsion (r[0]), ham nomli (r['col']) kirish, dict(r) ishlaydi."""
+        __slots__ = ("_c", "_v")
+        def __init__(self, cols, vals): self._c = cols; self._v = list(vals)
+        def keys(self): return self._c
+        def __getitem__(self, k): return self._v[k] if isinstance(k, int) else self._v[self._c.index(k)]
+        def __iter__(self): return iter(self._v)
+        def __len__(self): return len(self._v)
+
+    def _pg_rows(cursor):
+        cols = [c.name for c in cursor.description] if cursor.description else []
+        return lambda vals: HybridRow(cols, vals)
+
+    class PGConn:
+        """sqlite3.Connection interfeysiga mos wrapper (? -> %s tarjima)."""
+        def __init__(self): self.conn = psycopg.connect(DATABASE_URL)
+        def execute(self, sql, params=()):
+            cur = self.conn.cursor(row_factory=_pg_rows)
+            cur.execute(sql.replace("?", "%s"), params)
+            return cur
+        def commit(self): self.conn.commit()
+        def close(self): self.conn.close()
+
+_tables_ready = False
+
+def _ensure_tables(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS analyses(
+        id TEXT PRIMARY KEY, created_at TEXT, patient_name TEXT, patient_age INTEGER,
+        birads INTEGER, modality TEXT, confidence REAL, is_in_situ INTEGER,
+        doctor_id TEXT, data TEXT)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS users(
+        id TEXT PRIMARY KEY, name TEXT, phone TEXT UNIQUE, specialization TEXT,
+        clinic TEXT, license TEXT, password_hash TEXT, salt TEXT, role TEXT,
+        approved INTEGER DEFAULT 0, token TEXT, created_at TEXT)""")
+    if IS_PG:
+        conn.execute("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS doctor_id TEXT")
+    else:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(analyses)").fetchall()]
+        if "doctor_id" not in cols:
+            conn.execute("ALTER TABLE analyses ADD COLUMN doctor_id TEXT")
+    conn.commit()
 
 
 def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""CREATE TABLE IF NOT EXISTS analyses(
-        id TEXT PRIMARY KEY,
-        created_at TEXT,
-        patient_name TEXT,
-        patient_age INTEGER,
-        birads INTEGER,
-        modality TEXT,
-        confidence REAL,
-        is_in_situ INTEGER,
-        doctor_id TEXT,
-        data TEXT)""")
-    # Migratsiya: eski bazaga doctor_id ustunini qo'shish
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(analyses)").fetchall()]
-    if "doctor_id" not in cols:
-        conn.execute("ALTER TABLE analyses ADD COLUMN doctor_id TEXT")
-    # Foydalanuvchilar (shifokor/admin)
-    conn.execute("""CREATE TABLE IF NOT EXISTS users(
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        phone TEXT UNIQUE,
-        specialization TEXT,
-        clinic TEXT,
-        license TEXT,
-        password_hash TEXT,
-        salt TEXT,
-        role TEXT,
-        approved INTEGER DEFAULT 0,
-        token TEXT,
-        created_at TEXT)""")
+    global _tables_ready
+    if IS_PG:
+        conn = PGConn()
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+    if not _tables_ready:
+        _ensure_tables(conn)
+        _tables_ready = True
     return conn
 
 
@@ -1088,22 +1114,28 @@ def save_history(record: dict):
         record["id"] = str(uuid.uuid4())[:12]
     conn = db()
     try:
-        conn.execute(
-            "INSERT OR REPLACE INTO analyses(id, created_at, patient_name, patient_age, birads, modality, confidence, is_in_situ, doctor_id, data) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                str(record["id"]),
-                record.get("date") or datetime.utcnow().isoformat(),
-                record.get("patientName") or "",
-                int(record["patientAge"]) if str(record.get("patientAge") or "").isdigit() else None,
-                int(record.get("birads") or 0),
-                record.get("modality") or "",
-                float(record.get("confidence") or 0),
-                1 if record.get("isInSitu") else 0,
-                record.get("doctorId") or "",
-                json.dumps(record, ensure_ascii=False),
-            ),
+        vals = (
+            str(record["id"]),
+            record.get("date") or datetime.utcnow().isoformat(),
+            record.get("patientName") or "",
+            int(record["patientAge"]) if str(record.get("patientAge") or "").isdigit() else None,
+            int(record.get("birads") or 0),
+            record.get("modality") or "",
+            float(record.get("confidence") or 0),
+            1 if record.get("isInSitu") else 0,
+            record.get("doctorId") or "",
+            json.dumps(record, ensure_ascii=False),
         )
+        cols = "id, created_at, patient_name, patient_age, birads, modality, confidence, is_in_situ, doctor_id, data"
+        if IS_PG:
+            conn.execute(
+                f"INSERT INTO analyses({cols}) VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT (id) DO UPDATE SET created_at=EXCLUDED.created_at, patient_name=EXCLUDED.patient_name, "
+                "patient_age=EXCLUDED.patient_age, birads=EXCLUDED.birads, modality=EXCLUDED.modality, "
+                "confidence=EXCLUDED.confidence, is_in_situ=EXCLUDED.is_in_situ, doctor_id=EXCLUDED.doctor_id, data=EXCLUDED.data",
+                vals)
+        else:
+            conn.execute(f"INSERT OR REPLACE INTO analyses({cols}) VALUES (?,?,?,?,?,?,?,?,?,?)", vals)
         conn.commit()
     finally:
         conn.close()

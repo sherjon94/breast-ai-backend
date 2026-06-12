@@ -6,3 +6,4 @@ pillow
 numpy
 onnxruntime==1.26.0
 pydicom
+psycopg[binary]

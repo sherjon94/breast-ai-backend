@@ -72,6 +72,22 @@ git commit -m "Real BUSI-trained model + metrics" && git push
 # Render avtomatik deploy, frontend Statistika sahifasida metrikalarni ko'rsatadi
 ```
 
+## Doimiy baza — PostgreSQL (v3.2)
+
+Standart holatda SQLite ishlatiladi (lokal/efemer). `DATABASE_URL` muhit
+o'zgaruvchisi berilsa, avtomatik **PostgreSQL** (doimiy) ga o'tadi — hisoblar
+va tarix redeploy'da saqlanadi.
+
+### Render'da Postgres ulash (bepul)
+1. Render dashboard → **New** → **PostgreSQL** → bepul tarif → yarating
+2. Yaratilgan bazaning **Internal Database URL** ini nusxalang
+3. Backend web service → **Environment** → yangi o'zgaruvchi:
+   `DATABASE_URL = <internal database url>`
+4. Saqlang — avtomatik redeploy bo'ladi. Endi hisoblar doimiy saqlanadi.
+
+Lokal test (Docker): `docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 -d postgres`
+keyin `DATABASE_URL=postgresql://postgres:pass@localhost:5432/postgres uvicorn main:app`.
+
 ## Yangi imkoniyatlar (v3.1)
 
 - **3-klass model** (normal/benign/malignant) — backend adaptiv (2 yoki 3 klass)
