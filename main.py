@@ -425,10 +425,17 @@ def build_ai_result(probs: np.ndarray, birads_score: float, threshold: float = 0
 
 
 def run_ai_inference(image_bytes: bytes, threshold: float = 0.5) -> dict:
+    """TTA bilan: rasm + uning gorizontal aks-ko'rinishi o'rtachalanadi (barqarorroq ishonch)"""
     from PIL import Image
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
-    probs, score = infer_probs(np.array(img, dtype=np.float32))
-    return build_ai_result(probs, score, threshold)
+    arr = np.array(img, dtype=np.float32)
+    probs1, score1 = infer_probs(arr)
+    probs2, score2 = infer_probs(arr[:, ::-1, :].copy())  # gorizontal flip (W o'qi)
+    probs = (probs1 + probs2) / 2.0
+    score = (score1 + score2) / 2.0
+    result = build_ai_result(probs, score, threshold)
+    result["tta"] = True
+    return result
 
 
 def mock_inference() -> dict:
