@@ -1,0 +1,276 @@
+{
+  "evaluated_at": "2026-06-13T07:20:41.300642",
+  "dataset": "DMID (Digital Mammography Image Dataset)",
+  "model": "EfficientNet-B0, ImageNet pretrained (mammography, 2-class)",
+  "classes": [
+    "benign",
+    "malignant"
+  ],
+  "n_total": 45,
+  "n_benign": 166,
+  "n_malignant": 130,
+  "accuracy": 0.6444,
+  "sensitivity": 0.55,
+  "specificity": 0.72,
+  "precision": 0.6111,
+  "f1": 0.5789,
+  "auc": 0.774,
+  "confusion_matrix": {
+    "tp": 11,
+    "tn": 18,
+    "fp": 7,
+    "fn": 9
+  },
+  "roc_curve": [
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 1.0
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.98
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.959
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.939
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.918
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.898
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.878
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.0,
+      "threshold": 0.857
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.05,
+      "threshold": 0.837
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.05,
+      "threshold": 0.816
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.05,
+      "threshold": 0.796
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.05,
+      "threshold": 0.776
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.2,
+      "threshold": 0.755
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.2,
+      "threshold": 0.735
+    },
+    {
+      "fpr": 0.0,
+      "tpr": 0.25,
+      "threshold": 0.714
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.25,
+      "threshold": 0.694
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.25,
+      "threshold": 0.673
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.3,
+      "threshold": 0.653
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.4,
+      "threshold": 0.633
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.45,
+      "threshold": 0.612
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.45,
+      "threshold": 0.592
+    },
+    {
+      "fpr": 0.08,
+      "tpr": 0.45,
+      "threshold": 0.571
+    },
+    {
+      "fpr": 0.16,
+      "tpr": 0.5,
+      "threshold": 0.551
+    },
+    {
+      "fpr": 0.16,
+      "tpr": 0.55,
+      "threshold": 0.531
+    },
+    {
+      "fpr": 0.24,
+      "tpr": 0.55,
+      "threshold": 0.51
+    },
+    {
+      "fpr": 0.28,
+      "tpr": 0.6,
+      "threshold": 0.49
+    },
+    {
+      "fpr": 0.28,
+      "tpr": 0.75,
+      "threshold": 0.469
+    },
+    {
+      "fpr": 0.32,
+      "tpr": 0.75,
+      "threshold": 0.449
+    },
+    {
+      "fpr": 0.4,
+      "tpr": 0.75,
+      "threshold": 0.429
+    },
+    {
+      "fpr": 0.4,
+      "tpr": 0.8,
+      "threshold": 0.408
+    },
+    {
+      "fpr": 0.48,
+      "tpr": 0.85,
+      "threshold": 0.388
+    },
+    {
+      "fpr": 0.52,
+      "tpr": 0.85,
+      "threshold": 0.367
+    },
+    {
+      "fpr": 0.56,
+      "tpr": 0.85,
+      "threshold": 0.347
+    },
+    {
+      "fpr": 0.64,
+      "tpr": 0.95,
+      "threshold": 0.327
+    },
+    {
+      "fpr": 0.64,
+      "tpr": 0.95,
+      "threshold": 0.306
+    },
+    {
+      "fpr": 0.72,
+      "tpr": 0.95,
+      "threshold": 0.286
+    },
+    {
+      "fpr": 0.84,
+      "tpr": 1.0,
+      "threshold": 0.265
+    },
+    {
+      "fpr": 0.88,
+      "tpr": 1.0,
+      "threshold": 0.245
+    },
+    {
+      "fpr": 0.88,
+      "tpr": 1.0,
+      "threshold": 0.224
+    },
+    {
+      "fpr": 0.88,
+      "tpr": 1.0,
+      "threshold": 0.204
+    },
+    {
+      "fpr": 0.88,
+      "tpr": 1.0,
+      "threshold": 0.184
+    },
+    {
+      "fpr": 0.88,
+      "tpr": 1.0,
+      "threshold": 0.163
+    },
+    {
+      "fpr": 0.92,
+      "tpr": 1.0,
+      "threshold": 0.143
+    },
+    {
+      "fpr": 0.96,
+      "tpr": 1.0,
+      "threshold": 0.122
+    },
+    {
+      "fpr": 0.96,
+      "tpr": 1.0,
+      "threshold": 0.102
+    },
+    {
+      "fpr": 0.96,
+      "tpr": 1.0,
+      "threshold": 0.082
+    },
+    {
+      "fpr": 1.0,
+      "tpr": 1.0,
+      "threshold": 0.061
+    },
+    {
+      "fpr": 1.0,
+      "tpr": 1.0,
+      "threshold": 0.041
+    },
+    {
+      "fpr": 1.0,
+      "tpr": 1.0,
+      "threshold": 0.02
+    },
+    {
+      "fpr": 1.0,
+      "tpr": 1.0,
+      "threshold": 0.0
+    }
+  ]
+}

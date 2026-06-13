@@ -136,6 +136,19 @@ try:
 except Exception as e:
     print(f"[!] Seg model: {e}")
 
+# Mammografiya modeli (ixtiyoriy — DMID'da o'qitilgan, 2-klass benign/malignant)
+MAMMO_AVAILABLE = False
+mammo_session = None
+try:
+    import onnxruntime as ort
+    mammo_path = Path(__file__).parent / "breast_ai_mammo.onnx"
+    if mammo_path.exists():
+        mammo_session = ort.InferenceSession(str(mammo_path))
+        MAMMO_AVAILABLE = True
+        print("[OK] Mammografiya modeli yuklandi")
+except Exception as e:
+    print(f"[!] Mammo model: {e}")
+
 
 # ─── TARIX BAZASI (SQLite lokal / PostgreSQL Render) ──────────────────────────
 # DATABASE_URL bo'lsa PostgreSQL (doimiy), bo'lmasa SQLite (lokal/efemer).
@@ -438,6 +451,45 @@ def run_ai_inference(image_bytes: bytes, threshold: float = 0.5) -> dict:
     return result
 
 
+def run_mammo_inference(image_bytes: bytes, threshold: float = 0.5) -> dict:
+    """Mammografiya modeli (DMID, 2-klass benign/malignant) + TTA"""
+    from PIL import Image
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
+    arr = np.array(img, dtype=np.float32)
+
+    def _one(a):
+        x = a / 255.0
+        x = (x - IMG_MEAN) / IMG_STD
+        return mammo_session.run(None, {"image": x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0]
+
+    probs = (_one(arr) + _one(arr[:, ::-1, :].copy())) / 2.0
+    p_benign, p_malignant = float(probs[0]), float(probs[1])
+    sub = malignant_subcat(p_malignant)
+    meta = SUBCAT_META[sub]
+    fu = followup_recommendation(meta["category"], sub)
+    return {
+        "predicted_class":     "malignant" if p_malignant >= p_benign else "benign",
+        "confidence":          round(max(p_benign, p_malignant), 4),
+        "birads_category":     meta["category"],
+        "birads_subcategory":  sub,
+        "birads_label":        meta["label"],
+        "malignancy_risk_pct": meta["risk"],
+        "recommendation":      meta["rec"],
+        "is_in_situ":          False,
+        "class_probabilities": {"benign": round(p_benign, 4), "malignant": round(p_malignant, 4)},
+        "operating_point":     threshold,
+        "flagged_malignant":   bool(p_malignant >= threshold),
+        "ai_model_used":       True,
+        "demo":                False,
+        "modality_model":      "mammography",
+        "n_classes":           2,
+        "tta":                 True,
+        "analysis_id":         str(uuid.uuid4())[:8],
+        "analyzed_at":         datetime.utcnow().isoformat(),
+        **fu,
+    }
+
+
 def mock_inference() -> dict:
     """AI model yo'q bo'lganda DEMO natija — tasodifiy, klinik ahamiyatga ega EMAS"""
     p_m = round(random.uniform(0.05, 0.95), 4)
@@ -580,7 +632,8 @@ def unet_segmentation(image_bytes: bytes) -> dict:
     """U-Net ONNX modeli bilan segmentatsiya (breast_ai_seg.onnx)"""
     from PIL import Image
 
-    SIZE = 128
+    _s = seg_session.get_inputs()[0].shape[-1]   # model kiritish o'lchamini avtomatik aniqlash
+    SIZE = _s if isinstance(_s, int) else 128
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     if max(img.size) > 640:
         ratio = 640 / max(img.size)
@@ -870,6 +923,7 @@ def health():
         "status": "ok",
         "ai_model_loaded": AI_AVAILABLE,
         "seg_model_loaded": SEG_AVAILABLE,
+        "mammo_model_loaded": MAMMO_AVAILABLE,
         "classes": CLASSES,
         "n_classes": len(CLASSES),
         "version": "3.2.0",
@@ -936,10 +990,18 @@ async def _read_validated_image(file: UploadFile) -> bytes:
     return img_bytes
 
 
+def _infer(img_bytes: bytes, threshold: float, modality: str = "uzi") -> dict:
+    """Modallikka qarab to'g'ri modelni tanlash: mammo -> mammo modeli, aks holda US modeli"""
+    if modality == "mammo" and MAMMO_AVAILABLE:
+        return run_mammo_inference(img_bytes, threshold)
+    return run_ai_inference(img_bytes, threshold) if AI_AVAILABLE else mock_inference()
+
+
 @app.post("/api/analyze/image")
-async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5):
+async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5, modality: str = "uzi"):
     """Rasm yuklash: JPG, PNG, DICOM (.dcm), ZIP arxiv.
-    threshold — operating point (skrining=0.3 yuqori sezgirlik, tasdiqlash=0.7 yuqori spesifiklik)"""
+    threshold — operating point (skrining=0.3 yuqori sezgirlik, tasdiqlash=0.7 yuqori spesifiklik)
+    modality — uzi/mammo/combined (mammo bo'lsa mammografiya modeli ishlatiladi)"""
     content = await file.read()
     filename = (file.filename or "").lower()
     content_type = file.content_type or ""
@@ -961,7 +1023,7 @@ async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5):
 
                 is_valid, reason = is_medical_image(img_bytes)
                 if is_valid:
-                    result = run_ai_inference(img_bytes, threshold) if AI_AVAILABLE else mock_inference()
+                    result = _infer(img_bytes, threshold, modality)
                     result["filename"] = name
                     results.append(result)
             except Exception:
@@ -982,7 +1044,7 @@ async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5):
         is_valid, reason = is_medical_image(img_bytes)
         if not is_valid:
             raise HTTPException(422, {"error": "DICOM rasm sifati past", "message": reason})
-        result = run_ai_inference(img_bytes, threshold) if AI_AVAILABLE else mock_inference()
+        result = _infer(img_bytes, threshold, modality)
         result["format"] = "DICOM"
         return result
 
@@ -999,7 +1061,7 @@ async def analyze_image(file: UploadFile = File(...), threshold: float = 0.5):
         raise HTTPException(422, {"error": "Noto'g'ri rasm", "message": reason,
                                   "hint": "Iltimos, ultrasound (UZI) yoki mammografiya rasmi yuklang."})
 
-    result = run_ai_inference(content, threshold) if AI_AVAILABLE else mock_inference()
+    result = _infer(content, threshold, modality)
     result["format"] = "JPG/PNG"
     return result
 
@@ -1333,3 +1395,17 @@ def get_metrics():
         "available": False,
         "hint": "metrics.json topilmadi. BUSI test to'plami bilan 'python evaluate.py <dataset_papka>' ishga tushiring.",
     }
+
+
+@app.get("/api/mammo-metrics")
+def get_mammo_metrics():
+    """Mammografiya modeli sifat ko'rsatkichlari (mammo_metrics.json)"""
+    p = Path(__file__).parent / "mammo_metrics.json"
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            d["available"] = True
+            return d
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+    return {"available": False}

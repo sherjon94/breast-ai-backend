@@ -88,6 +88,22 @@ va tarix redeploy'da saqlanadi.
 Lokal test (Docker): `docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 -d postgres`
 keyin `DATABASE_URL=postgresql://postgres:pass@localhost:5432/postgres uvicorn main:app`.
 
+## Cheklovlarni yengish — ko'p manbali validatsiya (v3.3)
+
+Generalizatsiya muammosini (domain shift) yengish uchun ikkinchi mustaqil dataset qo'shildi:
+
+- **Tashqi validatsiya:** BUSI'da o'qitilgan model BUS-BRA (Braziliya, 1875 rasm, biopsiya bilan) da test qilindi → AUC **0.684** (domain shift fosh bo'ldi)
+- **Birlashgan model:** BUSI + BUS-BRA birga o'qitildi → ikkala manbada held-out test AUC **0.932**, sezgirlik 82% (generalizatsiya yaxshilandi)
+- **Mammografiya modeli:** DMID datasetida (411 rasm) EfficientNet-B0 → test AUC **0.774** (cheklangan — to'liq mammogramma kam ma'lumotda qiyin; patch-based + ko'proq ma'lumot kelajak ishi)
+- **Segmentatsiya v2:** Attention U-Net, 192px → Dice **0.654** (eski 0.62 dan yaxshi)
+
+Skriptlar: `external_validation.py`, `train_combined.py` (BUSI+BUS-BRA), `train_mammo.py` (DMID), `train_segmentation_v2.py` (Attention U-Net), `download_dmid.py`.
+
+Datasetlar (gitignore'da):
+- BUSI: HuggingFace `gymprathap/Breast-Cancer-Ultrasound-Images-Dataset`
+- BUS-BRA: Zenodo `10.5281/zenodo.8231412`
+- DMID: HuggingFace `MyTwinLab/DMID_Breast_Cancer_Mammography_Dataset`
+
 ## Yangi imkoniyatlar (v3.1)
 
 - **3-klass model** (normal/benign/malignant) — backend adaptiv (2 yoki 3 klass)

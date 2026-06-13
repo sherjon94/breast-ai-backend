@@ -13,3 +13,8 @@ breast_ai_model_OLD_broken.onnx
 cv_metrics.json
 comparison.json
 smoke_*.png
+busbra.zip
+busbra_data/
+dmid_data/
+dmid_meta.xlsx
+external_metrics.json
