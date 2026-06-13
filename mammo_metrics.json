@@ -1,25 +1,23 @@
 {
-  "evaluated_at": "2026-06-13T07:20:41.300642",
-  "dataset": "DMID (Digital Mammography Image Dataset)",
-  "model": "EfficientNet-B0, ImageNet pretrained (mammography, 2-class)",
+  "evaluated_at": "2026-06-13T17:17:09.989236",
+  "dataset": "CBIS-DDSM + DMID (combined, multi-source)",
+  "model": "EfficientNet-B0, combined mammography (2-class)",
   "classes": [
     "benign",
     "malignant"
   ],
-  "n_total": 45,
-  "n_benign": 166,
-  "n_malignant": 130,
-  "accuracy": 0.6444,
-  "sensitivity": 0.55,
-  "specificity": 0.72,
-  "precision": 0.6111,
-  "f1": 0.5789,
-  "auc": 0.774,
+  "n_total": 1397,
+  "accuracy": 0.582,
+  "sensitivity": 0.8659,
+  "specificity": 0.3964,
+  "precision": 0.4838,
+  "f1": 0.6208,
+  "auc": 0.7276,
   "confusion_matrix": {
-    "tp": 11,
-    "tn": 18,
-    "fp": 7,
-    "fn": 9
+    "tp": 478,
+    "tn": 335,
+    "fp": 510,
+    "fn": 74
   },
   "roc_curve": [
     {
@@ -64,206 +62,206 @@
     },
     {
       "fpr": 0.0,
-      "tpr": 0.05,
+      "tpr": 0.0145,
       "threshold": 0.837
     },
     {
       "fpr": 0.0,
-      "tpr": 0.05,
+      "tpr": 0.0254,
       "threshold": 0.816
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.05,
+      "fpr": 0.0012,
+      "tpr": 0.0435,
       "threshold": 0.796
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.05,
+      "fpr": 0.0012,
+      "tpr": 0.0616,
       "threshold": 0.776
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.2,
+      "fpr": 0.0059,
+      "tpr": 0.0924,
       "threshold": 0.755
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.2,
+      "fpr": 0.0083,
+      "tpr": 0.1123,
       "threshold": 0.735
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.25,
+      "fpr": 0.0107,
+      "tpr": 0.1449,
       "threshold": 0.714
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.25,
+      "fpr": 0.0201,
+      "tpr": 0.1667,
       "threshold": 0.694
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.25,
+      "fpr": 0.0367,
+      "tpr": 0.212,
       "threshold": 0.673
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.3,
+      "fpr": 0.0521,
+      "tpr": 0.2591,
       "threshold": 0.653
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.4,
+      "fpr": 0.0769,
+      "tpr": 0.3025,
       "threshold": 0.633
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.45,
+      "fpr": 0.1172,
+      "tpr": 0.3641,
       "threshold": 0.612
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.45,
+      "fpr": 0.1751,
+      "tpr": 0.4674,
       "threshold": 0.592
     },
     {
-      "fpr": 0.08,
-      "tpr": 0.45,
+      "fpr": 0.2651,
+      "tpr": 0.5797,
       "threshold": 0.571
     },
     {
-      "fpr": 0.16,
-      "tpr": 0.5,
+      "fpr": 0.3787,
+      "tpr": 0.6667,
       "threshold": 0.551
     },
     {
-      "fpr": 0.16,
-      "tpr": 0.55,
+      "fpr": 0.4568,
+      "tpr": 0.7572,
       "threshold": 0.531
     },
     {
-      "fpr": 0.24,
-      "tpr": 0.55,
+      "fpr": 0.5609,
+      "tpr": 0.8315,
       "threshold": 0.51
     },
     {
-      "fpr": 0.28,
-      "tpr": 0.6,
+      "fpr": 0.6308,
+      "tpr": 0.9004,
       "threshold": 0.49
     },
     {
-      "fpr": 0.28,
-      "tpr": 0.75,
+      "fpr": 0.7089,
+      "tpr": 0.9402,
       "threshold": 0.469
     },
     {
-      "fpr": 0.32,
-      "tpr": 0.75,
+      "fpr": 0.7811,
+      "tpr": 0.9638,
       "threshold": 0.449
     },
     {
-      "fpr": 0.4,
-      "tpr": 0.75,
+      "fpr": 0.8213,
+      "tpr": 0.9764,
       "threshold": 0.429
     },
     {
-      "fpr": 0.4,
-      "tpr": 0.8,
+      "fpr": 0.8521,
+      "tpr": 0.9873,
       "threshold": 0.408
     },
     {
-      "fpr": 0.48,
-      "tpr": 0.85,
+      "fpr": 0.8793,
+      "tpr": 0.9928,
       "threshold": 0.388
     },
     {
-      "fpr": 0.52,
-      "tpr": 0.85,
+      "fpr": 0.9006,
+      "tpr": 0.9946,
       "threshold": 0.367
     },
     {
-      "fpr": 0.56,
-      "tpr": 0.85,
+      "fpr": 0.916,
+      "tpr": 0.9946,
       "threshold": 0.347
     },
     {
-      "fpr": 0.64,
-      "tpr": 0.95,
+      "fpr": 0.9243,
+      "tpr": 0.9946,
       "threshold": 0.327
     },
     {
-      "fpr": 0.64,
-      "tpr": 0.95,
+      "fpr": 0.9325,
+      "tpr": 0.9982,
       "threshold": 0.306
     },
     {
-      "fpr": 0.72,
-      "tpr": 0.95,
+      "fpr": 0.9373,
+      "tpr": 0.9982,
       "threshold": 0.286
     },
     {
-      "fpr": 0.84,
-      "tpr": 1.0,
+      "fpr": 0.942,
+      "tpr": 0.9982,
       "threshold": 0.265
     },
     {
-      "fpr": 0.88,
+      "fpr": 0.9456,
       "tpr": 1.0,
       "threshold": 0.245
     },
     {
-      "fpr": 0.88,
+      "fpr": 0.9503,
       "tpr": 1.0,
       "threshold": 0.224
     },
     {
-      "fpr": 0.88,
+      "fpr": 0.9515,
       "tpr": 1.0,
       "threshold": 0.204
     },
     {
-      "fpr": 0.88,
+      "fpr": 0.9562,
       "tpr": 1.0,
       "threshold": 0.184
     },
     {
-      "fpr": 0.88,
+      "fpr": 0.9586,
       "tpr": 1.0,
       "threshold": 0.163
     },
     {
-      "fpr": 0.92,
+      "fpr": 0.9586,
       "tpr": 1.0,
       "threshold": 0.143
     },
     {
-      "fpr": 0.96,
+      "fpr": 0.9645,
       "tpr": 1.0,
       "threshold": 0.122
     },
     {
-      "fpr": 0.96,
+      "fpr": 0.968,
       "tpr": 1.0,
       "threshold": 0.102
     },
     {
-      "fpr": 0.96,
+      "fpr": 0.9728,
       "tpr": 1.0,
       "threshold": 0.082
     },
     {
-      "fpr": 1.0,
+      "fpr": 0.9775,
       "tpr": 1.0,
       "threshold": 0.061
     },
     {
-      "fpr": 1.0,
+      "fpr": 0.9858,
       "tpr": 1.0,
       "threshold": 0.041
     },
     {
-      "fpr": 1.0,
+      "fpr": 0.9976,
       "tpr": 1.0,
       "threshold": 0.02
     },
@@ -272,5 +270,19 @@
       "tpr": 1.0,
       "threshold": 0.0
     }
-  ]
+  ],
+  "per_source": {
+    "CBIS_test": {
+      "auc": 0.7276,
+      "sensitivity": 0.8659,
+      "specificity": 0.3964,
+      "n": 1397
+    },
+    "DMID_holdout": {
+      "auc": 0.7706,
+      "sensitivity": 0.8636,
+      "specificity": 0.5455,
+      "n": 44
+    }
+  }
 }
