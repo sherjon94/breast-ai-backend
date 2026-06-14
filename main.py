@@ -31,10 +31,14 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=r"https://.*\.vercel\.app",   # faqat Vercel frontend + lokal
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+MODEL_VERSION = "3.3"           # audit izi uchun — har tahlil natijasiga qo'shiladi
+TOKEN_TTL_DAYS = 30            # token amal qilish muddati
 
 # ─── AI MODEL ─────────────────────────────────────────────────────────────────
 
@@ -201,10 +205,14 @@ def _ensure_tables(conn):
         resolved INTEGER DEFAULT 0, created_at TEXT)""")
     if IS_PG:
         conn.execute("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS doctor_id TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_created TEXT")
     else:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(analyses)").fetchall()]
         if "doctor_id" not in cols:
             conn.execute("ALTER TABLE analyses ADD COLUMN doctor_id TEXT")
+        ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "token_created" not in ucols:
+            conn.execute("ALTER TABLE users ADD COLUMN token_created TEXT")
     conn.commit()
 
 
@@ -246,7 +254,19 @@ def user_by_token(token: str):
     conn = db()
     try:
         r = conn.execute("SELECT * FROM users WHERE token=?", (token,)).fetchone()
-        return dict(r) if r else None
+        if not r:
+            return None
+        u = dict(r)
+        # Token muddati (TTL) tekshirish
+        tc = u.get("token_created")
+        if tc:
+            try:
+                age = (datetime.utcnow() - datetime.fromisoformat(tc)).days
+                if age > TOKEN_TTL_DAYS:
+                    return None  # muddati o'tgan
+            except Exception:
+                pass
+        return u
     finally:
         conn.close()
 
@@ -431,6 +451,7 @@ def build_ai_result(probs: np.ndarray, birads_score: float, threshold: float = 0
         "birads_score":  round(birads_score, 4),
         "ai_model_used": True,
         "demo":          False,
+        "model_version": MODEL_VERSION,
         "n_classes":     len(CLASSES),
         "analysis_id":   str(uuid.uuid4())[:8],
         "analyzed_at":   datetime.utcnow().isoformat(),
@@ -482,6 +503,7 @@ def run_mammo_inference(image_bytes: bytes, threshold: float = 0.5) -> dict:
         "ai_model_used":       True,
         "demo":                False,
         "modality_model":      "mammography",
+        "model_version":       MODEL_VERSION,
         "n_classes":           2,
         "tta":                 True,
         "analysis_id":         str(uuid.uuid4())[:8],
@@ -511,6 +533,7 @@ def mock_inference() -> dict:
         "birads_score":  round(random.uniform(0.2, 0.8), 4),
         "ai_model_used": False,
         "demo":          True,
+        "model_version": MODEL_VERSION,
         "n_classes":     len(CLASSES),
         "analysis_id":   str(uuid.uuid4())[:8],
         "analyzed_at":   datetime.utcnow().isoformat(),
@@ -1121,8 +1144,20 @@ def register(req: RegisterRequest):
             "message": "Ro'yxatdan o'tdingiz. Admin tasdiqlashini kuting."}
 
 
+_login_attempts = {}  # rate limiting: phone -> [vaqt belgilari]
+
+def _rate_limit(key, max_attempts=8, window_sec=300):
+    import time
+    now = time.time()
+    arr = [t for t in _login_attempts.get(key, []) if now - t < window_sec]
+    arr.append(now); _login_attempts[key] = arr
+    if len(arr) > max_attempts:
+        raise HTTPException(429, "Juda ko'p urinish — 5 daqiqadan keyin qayta urining")
+
+
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
+    _rate_limit(req.phone.strip())   # brute-force himoyasi
     conn = db()
     try:
         r = conn.execute("SELECT * FROM users WHERE phone=?", (req.phone.strip(),)).fetchone()
@@ -1134,7 +1169,7 @@ def login(req: LoginRequest):
         if not u["approved"]:
             raise HTTPException(403, "Hisobingiz hali admin tomonidan tasdiqlanmagan")
         token = secrets.token_hex(24)
-        conn.execute("UPDATE users SET token=? WHERE id=?", (token, u["id"]))
+        conn.execute("UPDATE users SET token=?, token_created=? WHERE id=?", (token, datetime.utcnow().isoformat(), u["id"]))
         conn.commit()
     finally:
         conn.close()
@@ -1227,7 +1262,9 @@ def admin_report_resolve(req: ApproveRequest):
 # ─── TARIX (SQLITE) ───────────────────────────────────────────────────────────
 
 @app.post("/api/history")
-def save_history(record: dict):
+def save_history(record: dict, token: str = None):
+    u = require_user(token)                 # autentifikatsiya talab qilinadi
+    record["doctorId"] = u["id"]            # doctor_id token'dan (ishonchli manba)
     if not record.get("id"):
         record["id"] = str(uuid.uuid4())[:12]
     conn = db()
@@ -1241,7 +1278,7 @@ def save_history(record: dict):
             record.get("modality") or "",
             float(record.get("confidence") or 0),
             1 if record.get("isInSitu") else 0,
-            record.get("doctorId") or "",
+            u["id"],
             json.dumps(record, ensure_ascii=False),
         )
         cols = "id, created_at, patient_name, patient_age, birads, modality, confidence, is_in_situ, doctor_id, data"
