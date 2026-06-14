@@ -1,26 +1,27 @@
 {
-  "evaluated_at": "2026-06-13T21:52:04.977023",
+  "evaluated_at": "2026-06-14T11:29:18.233895",
   "dataset": "BUSI + BUS-BRA (combined, multi-source)",
-  "model": "EfficientNet-B0 (3-class), patient-grouped split",
+  "model": "EfficientNet-B0 (3-class), patient-grouped, inner-val CV, US-augmentation",
   "classes": [
     "normal",
     "benign",
     "malignant"
   ],
-  "split": "patient-grouped 70/15/15 (GroupShuffleSplit) — NO patient leakage",
+  "split": "patient-grouped 70/15/15; CV: 5-fold GroupKFold + inner-val (no test selection)",
   "n_total": 408,
-  "multiclass_accuracy": 0.8529,
-  "accuracy": 0.8652,
-  "sensitivity": 0.7025,
-  "specificity": 0.9338,
-  "precision": 0.8173,
-  "f1": 0.7556,
-  "auc": 0.9334,
+  "multiclass_accuracy": 0.8505,
+  "macro_ovr_auc": 0.9525,
+  "accuracy": 0.8676,
+  "sensitivity": 0.843,
+  "specificity": 0.878,
+  "precision": 0.7445,
+  "f1": 0.7907,
+  "auc": 0.9287,
   "confusion_matrix": {
-    "tp": 85,
-    "tn": 268,
-    "fp": 19,
-    "fn": 36
+    "tp": 102,
+    "tn": 252,
+    "fp": 35,
+    "fn": 19
   },
   "roc_curve": [
     {
@@ -30,242 +31,242 @@
     },
     {
       "fpr": 0.0,
-      "tpr": 0.0083,
+      "tpr": 0.0,
       "threshold": 0.98
     },
     {
       "fpr": 0.0,
-      "tpr": 0.0248,
+      "tpr": 0.0744,
       "threshold": 0.959
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.0413,
+      "fpr": 0.0035,
+      "tpr": 0.1818,
       "threshold": 0.939
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.0744,
+      "fpr": 0.0105,
+      "tpr": 0.2645,
       "threshold": 0.918
     },
     {
-      "fpr": 0.0,
-      "tpr": 0.0909,
+      "fpr": 0.0105,
+      "tpr": 0.314,
       "threshold": 0.898
     },
     {
-      "fpr": 0.007,
-      "tpr": 0.1653,
+      "fpr": 0.0105,
+      "tpr": 0.3636,
       "threshold": 0.878
     },
     {
-      "fpr": 0.007,
-      "tpr": 0.2066,
+      "fpr": 0.0174,
+      "tpr": 0.4545,
       "threshold": 0.857
     },
     {
-      "fpr": 0.007,
-      "tpr": 0.2397,
+      "fpr": 0.0209,
+      "tpr": 0.4876,
       "threshold": 0.837
     },
     {
-      "fpr": 0.007,
-      "tpr": 0.2645,
+      "fpr": 0.0209,
+      "tpr": 0.5785,
       "threshold": 0.816
     },
     {
-      "fpr": 0.007,
-      "tpr": 0.314,
+      "fpr": 0.0244,
+      "tpr": 0.6116,
       "threshold": 0.796
     },
     {
-      "fpr": 0.0105,
-      "tpr": 0.3223,
+      "fpr": 0.0383,
+      "tpr": 0.6198,
       "threshold": 0.776
     },
     {
-      "fpr": 0.0139,
-      "tpr": 0.3636,
+      "fpr": 0.0418,
+      "tpr": 0.6281,
       "threshold": 0.755
     },
     {
-      "fpr": 0.0174,
-      "tpr": 0.405,
+      "fpr": 0.0523,
+      "tpr": 0.6612,
       "threshold": 0.735
     },
     {
-      "fpr": 0.0174,
-      "tpr": 0.438,
+      "fpr": 0.0523,
+      "tpr": 0.6942,
       "threshold": 0.714
     },
     {
-      "fpr": 0.0209,
-      "tpr": 0.4463,
+      "fpr": 0.0523,
+      "tpr": 0.7273,
       "threshold": 0.694
     },
     {
-      "fpr": 0.0244,
-      "tpr": 0.4793,
+      "fpr": 0.0557,
+      "tpr": 0.7355,
       "threshold": 0.673
     },
     {
-      "fpr": 0.0314,
-      "tpr": 0.5124,
-      "threshold": 0.653
-    },
-    {
-      "fpr": 0.0383,
-      "tpr": 0.5289,
-      "threshold": 0.633
-    },
-    {
-      "fpr": 0.0418,
-      "tpr": 0.5868,
-      "threshold": 0.612
-    },
-    {
-      "fpr": 0.0418,
-      "tpr": 0.6116,
-      "threshold": 0.592
-    },
-    {
-      "fpr": 0.0453,
-      "tpr": 0.6198,
-      "threshold": 0.571
-    },
-    {
-      "fpr": 0.0488,
-      "tpr": 0.6364,
-      "threshold": 0.551
-    },
-    {
-      "fpr": 0.0557,
-      "tpr": 0.6694,
-      "threshold": 0.531
-    },
-    {
-      "fpr": 0.0592,
-      "tpr": 0.686,
-      "threshold": 0.51
-    },
-    {
       "fpr": 0.0662,
-      "tpr": 0.7107,
-      "threshold": 0.49
+      "tpr": 0.7438,
+      "threshold": 0.653
     },
     {
       "fpr": 0.0662,
       "tpr": 0.7769,
-      "threshold": 0.469
+      "threshold": 0.633
     },
     {
-      "fpr": 0.0871,
+      "fpr": 0.0801,
       "tpr": 0.7934,
-      "threshold": 0.449
+      "threshold": 0.612
     },
     {
-      "fpr": 0.1045,
-      "tpr": 0.8264,
-      "threshold": 0.429
+      "fpr": 0.0836,
+      "tpr": 0.8182,
+      "threshold": 0.592
+    },
+    {
+      "fpr": 0.0941,
+      "tpr": 0.8182,
+      "threshold": 0.571
+    },
+    {
+      "fpr": 0.0976,
+      "tpr": 0.8182,
+      "threshold": 0.551
     },
     {
       "fpr": 0.108,
-      "tpr": 0.8347,
-      "threshold": 0.408
+      "tpr": 0.8264,
+      "threshold": 0.531
+    },
+    {
+      "fpr": 0.1115,
+      "tpr": 0.843,
+      "threshold": 0.51
     },
     {
       "fpr": 0.1254,
-      "tpr": 0.843,
+      "tpr": 0.8512,
+      "threshold": 0.49
+    },
+    {
+      "fpr": 0.1429,
+      "tpr": 0.8512,
+      "threshold": 0.469
+    },
+    {
+      "fpr": 0.1533,
+      "tpr": 0.8595,
+      "threshold": 0.449
+    },
+    {
+      "fpr": 0.1882,
+      "tpr": 0.8595,
+      "threshold": 0.429
+    },
+    {
+      "fpr": 0.1986,
+      "tpr": 0.8843,
+      "threshold": 0.408
+    },
+    {
+      "fpr": 0.2091,
+      "tpr": 0.8926,
       "threshold": 0.388
     },
     {
-      "fpr": 0.1324,
-      "tpr": 0.8843,
+      "fpr": 0.2265,
+      "tpr": 0.9008,
       "threshold": 0.367
     },
     {
-      "fpr": 0.1394,
-      "tpr": 0.8926,
+      "fpr": 0.2404,
+      "tpr": 0.9091,
       "threshold": 0.347
     },
     {
-      "fpr": 0.1638,
-      "tpr": 0.9008,
+      "fpr": 0.2578,
+      "tpr": 0.9091,
       "threshold": 0.327
     },
     {
-      "fpr": 0.2125,
-      "tpr": 0.9174,
+      "fpr": 0.2822,
+      "tpr": 0.9256,
       "threshold": 0.306
     },
     {
-      "fpr": 0.2613,
-      "tpr": 0.9339,
+      "fpr": 0.3031,
+      "tpr": 0.9256,
       "threshold": 0.286
     },
     {
-      "fpr": 0.3031,
-      "tpr": 0.9669,
+      "fpr": 0.3275,
+      "tpr": 0.9256,
       "threshold": 0.265
     },
     {
-      "fpr": 0.3275,
-      "tpr": 0.9752,
+      "fpr": 0.3624,
+      "tpr": 0.9587,
       "threshold": 0.245
     },
     {
       "fpr": 0.3728,
-      "tpr": 0.9752,
+      "tpr": 0.9669,
       "threshold": 0.224
     },
     {
-      "fpr": 0.4007,
-      "tpr": 0.9835,
+      "fpr": 0.3833,
+      "tpr": 0.9669,
       "threshold": 0.204
     },
     {
-      "fpr": 0.4425,
-      "tpr": 0.9835,
+      "fpr": 0.4077,
+      "tpr": 0.9669,
       "threshold": 0.184
     },
     {
-      "fpr": 0.4878,
-      "tpr": 0.9835,
+      "fpr": 0.4564,
+      "tpr": 0.9669,
       "threshold": 0.163
     },
     {
-      "fpr": 0.5366,
-      "tpr": 0.9917,
+      "fpr": 0.4739,
+      "tpr": 0.9669,
       "threshold": 0.143
     },
     {
-      "fpr": 0.5714,
-      "tpr": 0.9917,
+      "fpr": 0.5052,
+      "tpr": 0.9752,
       "threshold": 0.122
     },
     {
-      "fpr": 0.6237,
-      "tpr": 0.9917,
+      "fpr": 0.5575,
+      "tpr": 0.9835,
       "threshold": 0.102
     },
     {
-      "fpr": 0.669,
-      "tpr": 0.9917,
+      "fpr": 0.6098,
+      "tpr": 0.9835,
       "threshold": 0.082
     },
     {
-      "fpr": 0.7247,
-      "tpr": 0.9917,
+      "fpr": 0.6655,
+      "tpr": 1.0,
       "threshold": 0.061
     },
     {
-      "fpr": 0.8014,
-      "tpr": 0.9917,
+      "fpr": 0.7491,
+      "tpr": 1.0,
       "threshold": 0.041
     },
     {
-      "fpr": 0.8502,
-      "tpr": 0.9917,
+      "fpr": 0.8641,
+      "tpr": 1.0,
       "threshold": 0.02
     },
     {
@@ -276,99 +277,107 @@
   ],
   "per_class_3class": {
     "normal": {
-      "recall": 0.905,
-      "precision": 0.826,
+      "recall": 0.81,
+      "precision": 0.81,
       "n": 21
     },
     "benign": {
-      "recall": 0.914,
-      "precision": 0.871,
+      "recall": 0.857,
+      "precision": 0.916,
       "n": 266
     },
     "malignant": {
-      "recall": 0.711,
-      "precision": 0.811,
+      "recall": 0.843,
+      "precision": 0.739,
       "n": 121
     }
   },
   "confusion_matrix_3x3": [
     [
-      19,
-      2,
-      0
+      17,
+      3,
+      1
     ],
     [
       3,
-      243,
-      20
+      228,
+      35
     ],
     [
       1,
-      34,
-      86
+      18,
+      102
     ]
   ],
   "calibration": {
-    "brier": 0.1006,
-    "ece": 0.0842
+    "brier": 0.1026,
+    "ece": 0.0895
   },
-  "youden_operating_point": 0.35,
+  "youden_operating_point": 0.6,
   "cross_validation": {
     "auc": {
-      "mean": 0.9112,
-      "ci95": 0.0239,
+      "mean": 0.9249,
+      "ci95": 0.0201,
       "folds": [
-        0.9356,
-        0.9147,
-        0.8928,
-        0.8909,
-        0.9221
+        0.9417,
+        0.9331,
+        0.9174,
+        0.9005,
+        0.9317
       ]
     },
     "sensitivity": {
-      "mean": 0.7916,
-      "ci95": 0.1123,
+      "mean": 0.8347,
+      "ci95": 0.0459,
       "folds": [
-        0.9392,
-        0.779,
-        0.7405,
-        0.7018,
-        0.7974
+        0.8619,
+        0.8619,
+        0.855,
+        0.7778,
+        0.817
       ]
     },
     "specificity": {
-      "mean": 0.8479,
-      "ci95": 0.0868,
+      "mean": 0.8703,
+      "ci95": 0.0509,
       "folds": [
-        0.7257,
-        0.8943,
-        0.8625,
-        0.8917,
-        0.8651
+        0.8886,
+        0.8571,
+        0.81,
+        0.875,
+        0.9206
       ]
     },
     "accuracy": {
-      "mean": 0.8324,
-      "ci95": 0.0266,
+      "mean": 0.8588,
+      "ci95": 0.0346,
       "folds": [
-        0.7985,
-        0.855,
-        0.8324,
-        0.8305,
-        0.8456
+        0.8795,
+        0.8588,
+        0.8211,
+        0.8437,
+        0.8908
       ]
     },
     "f1": {
-      "mean": 0.7415,
-      "ci95": 0.0469,
+      "mean": 0.7824,
+      "ci95": 0.0637,
       "folds": [
-        0.7606,
-        0.7855,
-        0.6855,
-        0.7273,
-        0.7485
+        0.8298,
+        0.8062,
+        0.7022,
+        0.7622,
+        0.8117
       ]
     }
   },
-  "cv_note": "5-fold GroupKFold, patient-grouped, combined model"
+  "cv_note": "5-fold GroupKFold, patient-grouped, inner-val model selection (no leakage), consistent epochs",
+  "training_improvements": [
+    "inner-val (no test selection)",
+    "consistent epochs CV=final",
+    "US-appropriate augmentation",
+    "macro-OvR-AUC selection",
+    "aspect-ratio preserved",
+    "capped class weights"
+  ]
 }
