@@ -4,6 +4,7 @@ Real ONNX model + BI-RADS 4a/4b/4c + Explainability + Segmentatsiya + SQLite tar
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -26,7 +27,7 @@ import os
 app = FastAPI(
     title="Breast AI API",
     description="Multimodal sut bezi diagnostikasi — UZI + Mammografiya + AI",
-    version="3.2.0",
+    version="3.4.0",
 )
 
 app.add_middleware(
@@ -37,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_VERSION = "3.3"           # audit izi uchun — har tahlil natijasiga qo'shiladi
+MODEL_VERSION = "3.4"           # audit izi uchun — har tahlil natijasiga qo'shiladi
 TOKEN_TTL_DAYS = 30            # token amal qilish muddati
 
 # ─── AI MODEL ─────────────────────────────────────────────────────────────────
@@ -203,6 +204,19 @@ def _ensure_tables(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS reports(
         id TEXT PRIMARY KEY, doctor_id TEXT, doctor_name TEXT, text TEXT,
         resolved INTEGER DEFAULT 0, created_at TEXT)""")
+    conn.execute(f"""CREATE TABLE IF NOT EXISTS archive_patients(
+        id TEXT PRIMARY KEY, accession_number TEXT UNIQUE, full_name TEXT, pinfl TEXT, phone TEXT,
+        birth_date TEXT, age INTEGER, gender TEXT, city TEXT, institution TEXT, visit_date TEXT,
+        birads_result TEXT, created_at TEXT)""")
+    conn.execute(f"""CREATE TABLE IF NOT EXISTS archive_images(
+        id TEXT PRIMARY KEY, patient_id TEXT, view_name TEXT, laterality TEXT,
+        image_data {"BYTEA" if IS_PG else "BLOB"}, content_type TEXT)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS clinical_cases (
+        id TEXT PRIMARY KEY, case_number INTEGER, full_name TEXT, age INTEGER,
+        laterality TEXT, birads_category INTEGER, birads_subcategory TEXT,
+        molecular_subtype TEXT, utt_findings TEXT, mammography_findings TEXT,
+        mskt_petkt_findings TEXT, biopsy_result TEXT, ihc_result TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
     if IS_PG:
         conn.execute("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS doctor_id TEXT")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_created TEXT")
@@ -214,6 +228,26 @@ def _ensure_tables(conn):
         if "token_created" not in ucols:
             conn.execute("ALTER TABLE users ADD COLUMN token_created TEXT")
     conn.commit()
+
+    # Agar clinical_cases bo'sh bo'lsa, clinical_cases.json dan avtomatik to'ldirish
+    try:
+        cnt_row = conn.execute("SELECT COUNT(*) FROM clinical_cases").fetchone()
+        cnt = cnt_row[0] if cnt_row else 0
+        if cnt == 0:
+            json_file = Path(__file__).parent / "clinical_cases.json"
+            if json_file.exists():
+                cases_data = json.loads(json_file.read_text(encoding="utf-8"))
+                for c in cases_data:
+                    c_cols = "id, case_number, full_name, age, laterality, birads_category, birads_subcategory, molecular_subtype, utt_findings, mammography_findings, mskt_petkt_findings, biopsy_result, ihc_result"
+                    vals = (c.get("id"), c.get("case_number"), c.get("full_name"), c.get("age"),
+                            c.get("laterality"), c.get("birads_category", 4), c.get("birads_subcategory"),
+                            c.get("molecular_subtype"), c.get("utt_findings"), c.get("mammography_findings"),
+                            c.get("mskt_petkt_findings"), c.get("biopsy_result"), c.get("ihc_result"))
+                    conn.execute(f"INSERT INTO clinical_cases({c_cols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", vals)
+                conn.commit()
+                print(f"[OK] {len(cases_data)} ta klinik arxiv yozuvi avtomatik yuklandi.")
+    except Exception as e:
+        print(f"[!] clinical_cases avtomatik to'ldirishda ogohlantirish: {e}")
 
 
 def db():
@@ -936,7 +970,8 @@ def root():
         "ai_model": "active" if AI_AVAILABLE else "mock",
         "endpoints": ["/api/analyze/uzi", "/api/analyze/mammo", "/api/analyze/combined",
                       "/api/analyze/image", "/api/explain", "/api/segment",
-                      "/api/history", "/api/metrics", "/api/stats", "/api/patients"],
+                      "/api/history", "/api/metrics", "/api/stats", "/api/patients",
+                      "/api/archive/cases", "/api/archive/case/{id}", "/api/archive/image/{id}"],
         "docs": "/docs",
     }
 
@@ -949,7 +984,7 @@ def health():
         "mammo_model_loaded": MAMMO_AVAILABLE,
         "classes": CLASSES,
         "n_classes": len(CLASSES),
-        "version": "3.2.0",
+        "version": "3.4.0",
         "db": "postgres" if IS_PG else "sqlite",
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -1446,3 +1481,166 @@ def get_mammo_metrics():
         except Exception as e:
             return {"available": False, "error": str(e)}
     return {"available": False}
+
+
+# ─── ARXIV — real BIRADS-4 skrining holatlari (Andijon) ──────────────────────
+# Faqat autentifikatsiya qilingan (tasdiqlangan) shifokor/admin ko'ra oladi.
+# ingest_birads4.py orqali to'ldiriladi (archive_patients / archive_images).
+
+@app.get("/api/archive/cases")
+def archive_cases(token: str, limit: int = 100, offset: int = 0):
+    require_user(token)
+    conn = db()
+    try:
+        rows = conn.execute(
+            "SELECT id, full_name, age, gender, city, institution, visit_date, birads_result "
+            "FROM archive_patients ORDER BY visit_date DESC LIMIT ? OFFSET ?",
+            (min(limit, 500), max(offset, 0))).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM archive_patients").fetchone()[0]
+    finally:
+        conn.close()
+    cases = [{"id": r[0], "full_name": r[1], "age": r[2], "gender": r[3], "city": r[4],
+              "institution": r[5], "visit_date": r[6], "birads_result": r[7]} for r in rows]
+    return {"count": len(cases), "total": total, "cases": cases}
+
+
+@app.get("/api/archive/case/{case_id}")
+def archive_case(case_id: str, token: str):
+    require_user(token)
+    conn = db()
+    try:
+        r = conn.execute("SELECT * FROM archive_patients WHERE id=?", (case_id,)).fetchone()
+        if not r:
+            raise HTTPException(404, "Bemor topilmadi")
+        p = dict(r)
+        imgs = conn.execute(
+            "SELECT id, view_name, laterality FROM archive_images WHERE patient_id=? ORDER BY view_name",
+            (case_id,)).fetchall()
+    finally:
+        conn.close()
+    p["images"] = [{"id": i[0], "view_name": i[1], "laterality": i[2],
+                     "url": f"/api/archive/image/{i[0]}"} for i in imgs]
+    return p
+
+
+@app.get("/api/archive/image/{image_id}")
+def archive_image(image_id: str, token: str):
+    require_user(token)
+    conn = db()
+    try:
+        r = conn.execute("SELECT image_data, content_type FROM archive_images WHERE id=?", (image_id,)).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        raise HTTPException(404, "Rasm topilmadi")
+    data = bytes(r[0])
+    return Response(content=data, media_type=r[1] or "image/jpeg")
+
+
+# ─── BIRLAMCHI KLINIK ARXIV (Docx pervichka: 105 ta bemor) ─────────────────────
+
+@app.get("/api/clinical-archive")
+def get_clinical_archive(
+    q: Optional[str] = None,
+    birads_sub: Optional[str] = None,
+    subtype: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0
+):
+    """
+    105 ta bemorning to'liq klinik tekshiruvlari:
+    UTT (BI-RADS), Mammografiya, MSKT/PET-KT, Biopsiya, Immunogistokimyo (IHK).
+    """
+    conn = db()
+    try:
+        query = ("SELECT id, case_number, full_name, age, laterality, birads_category, "
+                 "birads_subcategory, molecular_subtype, utt_findings, mammography_findings, "
+                 "mskt_petkt_findings, biopsy_result, ihc_result FROM clinical_cases WHERE 1=1")
+        params = []
+        if q:
+            query += " AND (full_name LIKE ? OR biopsy_result LIKE ? OR ihc_result LIKE ? OR utt_findings LIKE ?)"
+            term = f"%{q.strip()}%"
+            params.extend([term, term, term, term])
+        if birads_sub:
+            query += " AND birads_subcategory = ?"
+            params.append(birads_sub.strip().upper())
+        if subtype:
+            query += " AND molecular_subtype LIKE ?"
+            params.append(f"%{subtype.strip()}%")
+
+        count_query = query.replace("SELECT id, case_number, full_name, age, laterality, birads_category, birads_subcategory, molecular_subtype, utt_findings, mammography_findings, mskt_petkt_findings, biopsy_result, ihc_result", "SELECT COUNT(*)")
+        total_res = conn.execute(count_query, params).fetchone()
+        total = total_res[0] if total_res else 0
+
+        query += " ORDER BY case_number ASC LIMIT ? OFFSET ?"
+        params.extend([min(limit, 500), max(offset, 0)])
+        rows = conn.execute(query, params).fetchall()
+
+        cases = []
+        for r in rows:
+            cases.append({
+                "id": r[0],
+                "case_number": r[1],
+                "full_name": r[2],
+                "age": r[3],
+                "laterality": r[4],
+                "birads_category": r[5],
+                "birads_subcategory": r[6],
+                "molecular_subtype": r[7],
+                "utt_findings": r[8],
+                "mammography_findings": r[9],
+                "mskt_petkt_findings": r[10],
+                "biopsy_result": r[11],
+                "ihc_result": r[12],
+            })
+
+        return {"count": len(cases), "total": total, "cases": cases}
+    except Exception as e:
+        # Fallback: agar bazada xato bo'lsa JSON fayldan o'qish
+        json_file = Path(__file__).parent / "clinical_cases.json"
+        if json_file.exists():
+            data = json.loads(json_file.read_text(encoding="utf-8"))
+            if q:
+                ql = q.lower()
+                data = [c for c in data if ql in c["full_name"].lower() or ql in c["biopsy_result"].lower() or ql in c["ihc_result"].lower()]
+            if birads_sub:
+                data = [c for c in data if c.get("birads_subcategory") == birads_sub.upper()]
+            if subtype:
+                data = [c for c in data if subtype.lower() in c.get("molecular_subtype", "").lower()]
+            return {"count": len(data), "total": len(data), "cases": data[:limit]}
+        raise HTTPException(500, f"Xatolik: {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/clinical-archive/{case_id}")
+def get_clinical_case_detail(case_id: str):
+    """Bitta bemorning to'liq klinik kartasi"""
+    conn = db()
+    try:
+        r = conn.execute(
+            "SELECT id, case_number, full_name, age, laterality, birads_category, "
+            "birads_subcategory, molecular_subtype, utt_findings, mammography_findings, "
+            "mskt_petkt_findings, biopsy_result, ihc_result FROM clinical_cases WHERE id=? OR case_number=?",
+            (case_id, int(case_id) if case_id.isdigit() else -1)
+        ).fetchone()
+        if not r:
+            raise HTTPException(404, "Klinik bemor topilmadi")
+        return {
+            "id": r[0],
+            "case_number": r[1],
+            "full_name": r[2],
+            "age": r[3],
+            "laterality": r[4],
+            "birads_category": r[5],
+            "birads_subcategory": r[6],
+            "molecular_subtype": r[7],
+            "utt_findings": r[8],
+            "mammography_findings": r[9],
+            "mskt_petkt_findings": r[10],
+            "biopsy_result": r[11],
+            "ihc_result": r[12],
+        }
+    finally:
+        conn.close()
+
